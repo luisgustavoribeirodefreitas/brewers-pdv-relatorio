@@ -1222,10 +1222,12 @@ function renderStaffModal() {
   }
 
   if (modal === "order-detail" || modal === "table-detail") {
-    return renderStaffDialog(titles[modal], renderOrderFlowBody(), `
+    const order = selectedStaffOrder();
+    const orderTitle = `Alterar pedido ${order?.mesa || order?.id || ""}`;
+    return renderStaffDialog(orderTitle, renderOrderFlowBody(), `
       <button class="staff-secondary" data-action="close-staff-modal">Cancelar</button>
       <button class="staff-primary" data-action="save-order-items">Salvar Pedido</button>
-    `);
+    `, "order-detail-dialog");
   }
 
   if (modal === "client-step") {
@@ -1336,10 +1338,10 @@ function renderStaffModal() {
   `);
 }
 
-function renderStaffDialog(title, body, footer) {
+function renderStaffDialog(title, body, footer, extraClass = "") {
   return `
     <div class="modal-overlay staff-modal-layer">
-      <section class="staff-dialog" role="dialog" aria-modal="true">
+      <section class="staff-dialog${extraClass ? " " + extraClass : ""}" role="dialog" aria-modal="true">
         <button class="close-x staff-close" data-action="close-staff-modal" aria-label="Fechar">X</button>
         <h2>${title}</h2>
         <div class="staff-dialog-body">${body}</div>
@@ -1353,9 +1355,6 @@ function renderOrderFlowBody() {
   const order = selectedStaffOrder();
   const items = order?.items || [];
   return `
-    <div class="order-flow-tabs">
-      <button class="is-active">Pedido</button>
-    </div>
     <div class="staff-order-editor">
       <div class="staff-order-editor-head">
         <span>${order?.mesa || "Mesa"}</span>
@@ -1977,3 +1976,4 @@ function showToast(message) {
 
 render();
 bootstrap();
+

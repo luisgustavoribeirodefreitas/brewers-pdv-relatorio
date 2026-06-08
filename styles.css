@@ -2179,6 +2179,10 @@ button {
   font-weight: 800;
 }
 
+.order-detail-dialog h2 {
+  font-size: 22px;
+}
+
 .staff-close {
   position: absolute;
   top: 16px;
