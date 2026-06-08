@@ -1006,18 +1006,36 @@ function renderStaffOverview() {
   const activeTables = new Set(state.staffOrders.map((o) => o.mesa)).size;
   const totalTables = staffTables.length;
   const cashLabel = state.cashOpen ? "Caixa aberto" : "Abrir Caixa";
+  const cashAction = state.cashOpen ? "cash-menu" : "open-cash-modal";
+  const dropdownOpen = state.staffModal === "cash-menu";
+
+  const cashSlot = `
+    <div class="cash-button-wrap">
+      <button class="cash-button ${dropdownOpen ? "is-open" : ""}" data-action="${cashAction}">
+        ${cashLabel}<span class="cash-chevron">${dropdownOpen ? "∧" : "∨"}</span>
+      </button>
+      ${dropdownOpen ? `
+        <div class="cash-dropdown" data-cash-dropdown>
+          <button data-action="sangria-modal">Sangria</button>
+          <button data-action="suprimento-modal">Suprimento</button>
+          <button data-action="fechamento-modal">Fechar Caixa</button>
+        </div>
+      ` : ""}
+    </div>
+  `;
+
   return `
-    ${renderStaffHeader("Pedidos em Aberto", "Segunda-feira, 13 de Abril · 14:32", `
-      <button class="cash-button" data-action="${state.cashOpen ? "cash-menu" : "open-cash-modal"}">${cashLabel}<span>⌄</span></button>
-    `)}
+    ${renderStaffHeader("Pedidos em Aberto", "Segunda-feira, 13 de Abril · 14:32", cashSlot)}
     ${apiOnline ? "" : `<p class="offline-banner">Modo local: inicie o servidor para salvar no banco.</p>`}
-    <section class="staff-stats">
-      <article><strong>${todayOrders}</strong><span>Pedidos Hoje</span></article>
-      <article><strong class="warn">${prep}</strong><span>Em Preparo</span></article>
-      <article><strong class="ok">${delivered}</strong><span>Entregues</span></article>
-      <article><strong class="dark">${activeTables}/${totalTables}</strong><span>Mesas Ativas</span></article>
-    </section>
-    ${renderOrdersTable(state.staffOrders)}
+    ${state.cashOpen ? `
+      <section class="staff-stats">
+        <article><strong>${todayOrders}</strong><span>Pedidos Hoje</span></article>
+        <article><strong class="warn">${prep}</strong><span>Em Preparo</span></article>
+        <article><strong class="ok">${delivered}</strong><span>Entregues</span></article>
+        <article><strong class="dark">${activeTables}/${totalTables}</strong><span>Mesas Ativas</span></article>
+      </section>
+      ${renderOrdersTable(state.staffOrders)}
+    ` : `<p class="staff-cash-closed-msg">Abra o caixa para visualizar os pedidos.</p>`}
   `;
 }
 
@@ -1144,7 +1162,7 @@ function renderStaffSettings() {
 }
 
 function renderModal() {
-  if (state.staffModal) {
+  if (state.staffModal && state.staffModal !== "cash-menu") {
     modalRoot.innerHTML = renderStaffModal();
     return;
   }
@@ -1212,19 +1230,6 @@ function renderStaffModal() {
     "table-detail": "A2 — Tela de Pedidos"
   };
 
-  if (modal === "cash-menu") {
-    return `
-      <div class="modal-overlay staff-modal-layer">
-        <div class="cash-menu-popover">
-          <button data-action="staff-modal" data-modal="suprimento">Suprimento</button>
-          <button data-action="staff-modal" data-modal="sangria">Sangria</button>
-          <button data-action="staff-modal" data-modal="fechamento">Fechar Caixa</button>
-          <button data-action="close-staff-modal">Caixa aberto</button>
-        </div>
-      </div>
-    `;
-  }
-
   if (modal === "report-options") {
     return `
       <div class="modal-overlay staff-modal-layer">
@@ -1237,9 +1242,10 @@ function renderStaffModal() {
   }
 
   if (modal === "cash-warning") {
-    return renderStaffDialog(titles[modal], `
-      <p class="staff-dialog-message">Realize a abertura do caixa!</p>
-    `, `<button class="staff-primary" data-action="close-staff-modal">Voltar</button>`);
+    return renderStaffDialog("Realize a abertura do caixa!", ``, `
+      <button class="staff-secondary" data-action="close-staff-modal">Voltar</button>
+      <button class="staff-primary" data-action="open-cash-modal">Abrir Caixa</button>
+    `, "cash-warning-dialog");
   }
 
   if (modal === "order-detail" || modal === "table-detail") {
@@ -1287,15 +1293,27 @@ function renderStaffModal() {
 
   const bodyByModal = {
     "cash-open": `
-      <label class="staff-money-label">Valor disponível em caixa<input value="R$ 0,00"></label>
+      <p class="staff-money-subtitle">Valor disponível em caixa</p>
+      <div class="staff-money-row">
+        <span class="staff-money-prefix">R$</span>
+        <input class="staff-money-input" type="text" inputmode="decimal" placeholder="0,00" value="">
+      </div>
     `,
     sangria: `
-      <label class="staff-money-label">Valor a ser retirado do caixa<input value="R$"></label>
-      <label class="staff-money-label">Motivo<textarea placeholder="Motivo"></textarea></label>
+      <p class="staff-money-subtitle">Valor a ser retirado do caixa</p>
+      <div class="staff-money-row">
+        <span class="staff-money-prefix">R$</span>
+        <input class="staff-money-input" type="text" inputmode="decimal" placeholder="0,00" value="">
+      </div>
+      <label class="staff-money-label-plain">Motivo<textarea class="staff-money-textarea" placeholder=""></textarea></label>
     `,
     suprimento: `
-      <label class="staff-money-label">Valor a ser adicionado ao caixa<input value="R$"></label>
-      <label class="staff-money-label">Motivo<textarea placeholder="Motivo"></textarea></label>
+      <p class="staff-money-subtitle">Valor a ser adicionado ao caixa</p>
+      <div class="staff-money-row">
+        <span class="staff-money-prefix">R$</span>
+        <input class="staff-money-input" type="text" inputmode="decimal" placeholder="0,00" value="">
+      </div>
+      <label class="staff-money-label-plain">Motivo<textarea class="staff-money-textarea" placeholder=""></textarea></label>
     `,
     fechamento: `
       <div class="payment-summary">
@@ -1448,6 +1466,16 @@ function wireStaticFields() {
 }
 
 document.addEventListener("click", (event) => {
+  // Fecha o dropdown do caixa ao clicar fora dele
+  if (state.staffModal === "cash-menu") {
+    const inDropdown = event.target.closest(".cash-button-wrap");
+    if (!inDropdown) {
+      state.staffModal = null;
+      render();
+      return;
+    }
+  }
+
   const target = event.target.closest("button, [data-action], [data-category], [data-option], [data-reason]");
   if (!target) return;
 
@@ -1557,7 +1585,20 @@ document.addEventListener("click", (event) => {
       render();
     },
     "cash-menu": () => {
-      state.staffModal = "cash-menu";
+      // toggle dropdown inline — no modal overlay needed
+      state.staffModal = state.staffModal === "cash-menu" ? null : "cash-menu";
+      render();
+    },
+    "sangria-modal": () => {
+      state.staffModal = "sangria";
+      render();
+    },
+    "suprimento-modal": () => {
+      state.staffModal = "suprimento";
+      render();
+    },
+    "fechamento-modal": () => {
+      state.staffModal = "fechamento";
       render();
     },
     "staff-modal": () => {
@@ -1720,6 +1761,9 @@ async function enterStaffPanel() {
   window.location.hash = "atendente";
   state.view = "staff";
   state.staffView = "overview";
+  // Caixa começa fechado ao entrar no painel; aguarda syncCash para confirmar estado real
+  state.cashOpen = false;
+  state.staffOrders = [];
   render();
   await Promise.all([syncProducts(), syncOrders(), syncClients(), syncCash()]);
   render();
@@ -1844,7 +1888,7 @@ async function finalizeOrder() {
 }
 
 async function saveCashOpen() {
-  const input = document.querySelector(".staff-dialog input");
+  const input = document.querySelector(".staff-dialog .staff-money-input") || document.querySelector(".staff-dialog input");
   const balance = parseMoneyInput(input?.value);
   const data = await apiRequest("/api/cash/open", {
     method: "POST",
@@ -2012,4 +2056,3 @@ function showToast(message) {
 
 render();
 bootstrap();
-

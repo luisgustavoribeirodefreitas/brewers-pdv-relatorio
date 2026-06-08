@@ -1715,6 +1715,13 @@ button {
   font-weight: 700;
 }
 
+.cash-button-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
 .cash-button {
   min-width: 160px;
   min-height: 40px;
@@ -1722,12 +1729,65 @@ button {
   background: var(--color-surface-muted);
   color: var(--color-brand-dark);
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.25);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s;
 }
 
-.cash-button span {
-  margin-left: 8px;
+.cash-button.is-open {
+  background: var(--color-surface-muted);
+  border-radius: 6px 6px 0 0;
+}
+
+.cash-chevron {
+  font-size: 13px;
+  font-style: normal;
+  line-height: 1;
+  color: var(--color-brand-dark);
+}
+
+.cash-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 100%;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid var(--color-surface-muted);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 100;
+  display: grid;
+}
+
+.cash-dropdown button {
+  min-height: 40px;
+  padding: 0 16px;
+  background: transparent;
+  color: var(--color-brand-dark);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--color-surface-muted);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.cash-dropdown button:last-child {
+  border-bottom: none;
+}
+
+.cash-dropdown button:hover {
+  background: var(--color-surface-muted);
 }
 
 .staff-stats {
@@ -2202,6 +2262,89 @@ button {
   gap: 16px;
 }
 
+/* Mensagem de caixa fechado na visão geral */
+.staff-cash-closed-msg {
+  margin: 40px 20px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+/* Modal de aviso de caixa fechado */
+.cash-warning-dialog h2 {
+  text-align: center;
+  color: var(--color-brand);
+  font-size: 26px;
+  margin-bottom: 8px;
+}
+
+.cash-warning-dialog .staff-dialog-actions {
+  justify-content: center;
+}
+
+/* Rótulo simples para "Motivo" em Sangria/Suprimento */
+.staff-money-label-plain {
+  display: grid;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-header);
+}
+
+.staff-money-textarea {
+  min-height: 80px;
+  border: 1.5px solid var(--color-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-header);
+  padding: 12px 16px;
+  font-size: 15px;
+  outline: none;
+  resize: vertical;
+}
+
+.staff-money-textarea:focus {
+  border-color: var(--color-brand);
+}
+
+/* Cash-open modal: subtitle + R$ prefix row */
+.staff-money-subtitle {
+  margin: 0;
+  color: var(--color-brand);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.staff-money-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.staff-money-prefix {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-brand);
+  flex-shrink: 0;
+}
+
+.staff-money-input {
+  flex: 1;
+  min-height: 48px;
+  border: 1.5px solid var(--color-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-header);
+  padding: 0 16px;
+  font-size: 16px;
+  outline: none;
+}
+
+.staff-money-input:focus {
+  border-color: var(--color-brand);
+}
+
 .staff-dialog-actions {
   margin-top: 24px;
   display: flex;
@@ -2296,14 +2439,16 @@ button {
   gap: 4px;
 }
 
-.cash-menu-popover button,
 .report-options-popover button {
-  min-height: 30px;
+  min-height: 36px;
   border-radius: 6px;
   background: var(--color-surface-muted);
   color: var(--color-brand-dark);
   cursor: pointer;
   font-weight: 700;
+  font-size: 15px;
+  padding: 0 14px;
+  text-align: left;
 }
 
 .modal-overlay {
