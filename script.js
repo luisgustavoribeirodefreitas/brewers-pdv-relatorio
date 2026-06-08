@@ -6,12 +6,12 @@ const productDisplayOrder = {
   Doces: ["brownie-artesanal", "bolo-de-cenoura", "trufa-de-chocolate"]
 };
 const staffNav = [
-  { id: "overview", label: "Visão Geral", icon: "overview" },
-  { id: "orders", label: "Pedidos", icon: "orders" },
-  { id: "clients", label: "Clientes", icon: "clients" },
-  { id: "reports", label: "Relatórios", icon: "reports" },
-  { id: "menu", label: "Cardápio", icon: "menu" },
-  { id: "settings", label: "Configurações", icon: "settings" }
+  { id: "overview", label: "Visão Geral", icon: "overview", asset: "assets/icon-nav-overview.svg" },
+  { id: "orders", label: "Pedidos", icon: "orders", asset: "assets/icon-nav-orders.svg" },
+  { id: "clients", label: "Clientes", icon: "clients", asset: "assets/icon-nav-clients.svg" },
+  { id: "reports", label: "Relatórios", icon: "reports", asset: "assets/icon-nav-reports.svg" },
+  { id: "menu", label: "Cardápio", icon: "menu", asset: "assets/icon-nav-menu.svg" },
+  { id: "settings", label: "Configurações", icon: "settings", asset: "assets/icon-nav-settings.svg" }
 ];
 const orderStatusFlow = ["Novo", "Em preparo", "Pronto", "Entregue"];
 const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
@@ -273,12 +273,34 @@ function clearLegacyStaffStorage() {
   }
 }
 
+function staffPasswordRules(password) {
+  return [
+    { key: "length", label: "Mínimo 6 caracteres", valid: password.length >= 6, error: "A senha deve ter no mínimo 6 caracteres." },
+    { key: "uppercase", label: "Uma letra maiúscula", valid: /[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(password), error: "A senha deve conter pelo menos uma letra maiúscula." },
+    { key: "lowercase", label: "Uma letra minúscula", valid: /[a-záéíóúâêôãõç]/.test(password), error: "A senha deve conter pelo menos uma letra minúscula." },
+    { key: "number", label: "Um número", valid: /\d/.test(password), error: "A senha deve conter pelo menos um número." },
+    { key: "special", label: "Um caractere especial", valid: /[^A-Za-zÀ-ÿ0-9]/.test(password), error: "A senha deve conter pelo menos um caractere especial." }
+  ];
+}
+
+function renderStaffPasswordChecklist(password) {
+  return staffPasswordRules(password).map((rule) => `
+          <li class="${rule.valid ? "is-valid" : "is-invalid"}" data-password-rule="${rule.key}">${rule.label}</li>
+  `).join("");
+}
+
+function updateStaffPasswordChecklist(form, password) {
+  staffPasswordRules(password).forEach((rule) => {
+    const item = form.querySelector(`[data-password-rule="${rule.key}"]`);
+    if (!item) return;
+    item.classList.toggle("is-valid", rule.valid);
+    item.classList.toggle("is-invalid", !rule.valid);
+  });
+}
+
 function validateStaffPassword(password) {
-  if (password.length < 6) return "A senha deve ter no mínimo 6 caracteres.";
-  if (!/[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(password)) return "A senha deve conter pelo menos uma letra maiúscula.";
-  if (!/[a-záéíóúâêôãõç]/.test(password)) return "A senha deve conter pelo menos uma letra minúscula.";
-  if (!/\d/.test(password)) return "A senha deve conter pelo menos um número.";
-  if (!/[^A-Za-zÀ-ÿ0-9]/.test(password)) return "A senha deve conter pelo menos um caractere especial.";
+  const failingRule = staffPasswordRules(password).find((rule) => !rule.valid);
+  if (failingRule) return failingRule.error;
   return "";
 }
 
@@ -340,14 +362,7 @@ const state = {
   staffUser: null,
   cashOpen: false,
   toast: "",
-  staffOrders: [
-    { id: "p3", mesa: "Mesa 3", itens: "Cappuccino × 2, Pão de queijo", hora: "14:31", status: "Novo" },
-    { id: "p7", mesa: "Mesa 7", itens: "Cold Brew × 1, Croissant × 1", hora: "14:28", status: "Em preparo" },
-    { id: "p1", mesa: "Mesa 1", itens: "Espresso × 3", hora: "14:27", status: "Novo" },
-    { id: "p5", mesa: "Mesa 5", itens: "Latte × 2, Bolo de laranja × 2", hora: "14:20", status: "Em preparo" },
-    { id: "p9", mesa: "Mesa 9", itens: "Mocha × 1, Affogato × 1", hora: "14:15", status: "Pronto" },
-    { id: "p2", mesa: "Mesa 2", itens: "Flat White × 2", hora: "14:10", status: "Entregue" }
-  ],
+  staffOrders: [],
   staffClients: [
     { nome: "Luis Gustavo Freitas", cpf: "123.xxx.xxx-52", celular: "(43) 9 1644-4645", nascimento: "13/03/2007", endereco: "R. Marialvence, 140, Maringa, Parana" },
     { nome: "Maria Lucia Gonzaga", cpf: "158.xxx.xxx-90", celular: "(44) 9 5516-6358", nascimento: "25/12/1996", endereco: "R. Mario e Luigi, 6, Maringa, Parana" }
@@ -443,6 +458,39 @@ function orderFromApi(order) {
 
 function selectedStaffOrder() {
   return state.staffOrders.find((order) => order.id === state.selectedStaffOrderId) || state.staffOrders[0];
+}
+
+function staffOrderItemKey(item, index) {
+  return String(item.id ?? item.uid ?? `${item.product_id || item.productId || item.nome}-${index}`);
+}
+
+function recalculateStaffOrder(order) {
+  if (!order) return;
+  const items = order.items || [];
+  const subtotal = items.reduce((sum, item) => sum + Number(item.unit_price || item.unitPrice || item.preco || 0) * Number(item.quantity || 0), 0);
+  const service = subtotal * 0.1;
+  order.subtotal = subtotal;
+  order.service = service;
+  order.total = subtotal + service;
+  order.itens = items.length ? items.map((item) => `${item.nome} × ${item.quantity}`).join(", ") : "Sem itens";
+}
+
+function updateStaffOrderItemQty(orderId, itemKey, delta) {
+  const order = state.staffOrders.find((entry) => String(entry.id) === String(orderId));
+  if (!order?.items?.length) return;
+  const item = order.items.find((entry, index) => staffOrderItemKey(entry, index) === String(itemKey));
+  if (!item) return;
+  item.quantity = Math.max(1, Number(item.quantity || 1) + delta);
+  recalculateStaffOrder(order);
+  render();
+}
+
+function removeStaffOrderItem(orderId, itemKey) {
+  const order = state.staffOrders.find((entry) => String(entry.id) === String(orderId));
+  if (!order?.items?.length) return;
+  order.items = order.items.filter((entry, index) => staffOrderItemKey(entry, index) !== String(itemKey));
+  recalculateStaffOrder(order);
+  render();
 }
 
 async function apiRequest(path, options = {}) {
@@ -788,6 +836,7 @@ function renderStaffLogin() {
   const isRegister = state.staffLoginMode === "register";
   const loginDraft = state.staffLoginDraft;
   const registerDraft = state.staffRegisterDraft;
+  const previewUsername = staffUsernameFromName(registerDraft.firstName, registerDraft.lastName) || "nome.sobrenome";
   const error = state.staffLoginError
     ? `<div class="staff-login-error" role="alert">${escapeHtml(state.staffLoginError)}</div>`
     : "";
@@ -800,10 +849,13 @@ function renderStaffLogin() {
           <label>Sobrenome<input name="lastName" value="${escapeHtml(registerDraft.lastName)}" autocomplete="family-name" placeholder="Barista" required></label>
         </div>
         <label>Senha<input name="password" value="${escapeHtml(registerDraft.password)}" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres" required></label>
+        <ul class="staff-password-checklist" aria-label="Regras da senha">
+          ${renderStaffPasswordChecklist(registerDraft.password)}
+        </ul>
         <label>Código do gestor master<input name="managerCode" value="${escapeHtml(registerDraft.managerCode)}" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Código de 6 dígitos" required></label>
+        <p class="staff-username-preview">Usuário: <strong data-username-preview>${escapeHtml(previewUsername)}</strong></p>
         <button class="staff-primary" type="submit">Criar acesso</button>
         <button class="staff-link-button" type="button" data-action="staff-login-mode" data-mode="login">Já tenho acesso</button>
-        <small>Senha com maiúscula, minúscula, número e caractere especial</small>
   ` : `
         <h2>Bem-vindo</h2>
         <p>Acesse sua conta</p>
@@ -882,7 +934,9 @@ function renderStaffSidebar() {
       <nav class="staff-nav" aria-label="Navegação do painel">
         ${staffNav.map((item) => `
           <button class="staff-nav-item ${state.staffView === item.id ? "is-active" : ""}" data-action="staff-nav" data-staff-view="${item.id}">
-            <span class="staff-nav-icon staff-nav-icon-${item.icon}" aria-hidden="true"></span>${item.label}
+            <span class="staff-nav-icon staff-nav-icon-${item.icon}" aria-hidden="true">
+              <img src="${item.asset}" alt="" onload="this.parentElement.classList.add('has-asset')" onerror="this.remove()">
+            </span>${item.label}
           </button>
         `).join("")}
       </nav>
@@ -927,7 +981,8 @@ function renderStaffHeader(title, subtitle = "Segunda-feira, 13 de Abril · 14:3
 
 function renderStaffOverview() {
   const prep = state.staffOrders.filter((order) => order.status === "Em preparo").length;
-  const delivered = state.staffOrders.filter((order) => order.status === "Entregue").length + 33;
+  const delivered = state.staffOrders.filter((order) => order.status === "Entregue").length;
+  const todayOrders = state.staffOrders.length;
   const cashLabel = state.cashOpen ? "Caixa aberto" : "Abrir Caixa";
   return `
     ${renderStaffHeader("Pedidos em Aberto", "Segunda-feira, 13 de Abril · 14:32", `
@@ -935,7 +990,7 @@ function renderStaffOverview() {
     `)}
     ${apiOnline ? "" : `<p class="offline-banner">Modo local: inicie o servidor para salvar no banco.</p>`}
     <section class="staff-stats">
-      <article><strong>47</strong><span>Pedidos Hoje</span></article>
+      <article><strong>${todayOrders}</strong><span>Pedidos Hoje</span></article>
       <article><strong class="warn">${prep}</strong><span>Em Preparo</span></article>
       <article><strong class="ok">${delivered}</strong><span>Entregues</span></article>
       <article><strong class="dark">6/12</strong><span>Mesas Ativas</span></article>
@@ -950,7 +1005,7 @@ function renderOrdersTable(orders) {
       <div class="staff-table-head">
         <span>Mesa</span><span>Itens do Pedido</span><span>Hora</span><span>Status</span><span>Ações</span>
       </div>
-      ${orders.map((order) => `
+      ${orders.length ? orders.map((order) => `
         <article class="staff-order-row">
           <strong class="table-pill">${order.mesa}</strong>
           <span>${order.itens}</span>
@@ -961,7 +1016,7 @@ function renderOrdersTable(orders) {
             <button class="staff-mini-light" data-action="staff-order-detail" data-order-id="${order.id}">Editar</button>
           </div>
         </article>
-      `).join("")}
+      `).join("") : `<p class="staff-empty-orders">Nenhum pedido aberto no momento.</p>`}
     </section>
   `;
 }
@@ -1169,8 +1224,7 @@ function renderStaffModal() {
   if (modal === "order-detail" || modal === "table-detail") {
     return renderStaffDialog(titles[modal], renderOrderFlowBody(), `
       <button class="staff-secondary" data-action="close-staff-modal">Cancelar</button>
-      <button class="staff-primary" data-action="staff-modal" data-modal="client-step">Cliente</button>
-      <button class="staff-primary" data-action="staff-modal" data-modal="payment-step">Pagamento</button>
+      <button class="staff-primary" data-action="save-order-items">Salvar Pedido</button>
     `);
   }
 
@@ -1297,17 +1351,39 @@ function renderStaffDialog(title, body, footer) {
 
 function renderOrderFlowBody() {
   const order = selectedStaffOrder();
-  const items = order?.items?.length
-    ? order.items.map((item) => `<div><span>${item.nome}${item.option ? ` - ${item.option}` : ""}</span><strong>${money(item.unit_price * item.quantity)}</strong></div>`).join("")
-    : `<div><span>${order?.itens || "Cappuccino Italiano"}</span><strong>${money(order?.total || 28)}</strong></div>`;
+  const items = order?.items || [];
   return `
     <div class="order-flow-tabs">
       <button class="is-active">Pedido</button><button>Cliente</button><button>Pagamento</button>
     </div>
-    <div class="staff-config-list">
-      <div><span>${order?.mesa || "Mesa 7"}</span><strong>${order?.status || "Novo"}</strong></div>
-      ${items}
-      <div><span>Observação</span><em>Mesa próxima ao balcão.</em></div>
+    <div class="staff-order-editor">
+      <div class="staff-order-editor-head">
+        <span>${order?.mesa || "Mesa"}</span>
+        <strong>${order?.status || "Novo"}</strong>
+      </div>
+      ${items.length ? items.map((item, index) => {
+        const itemKey = staffOrderItemKey(item, index);
+        const unitPrice = Number(item.unit_price || item.preco || 0);
+        return `
+          <article class="staff-order-edit-row">
+            <div>
+              <strong>${item.nome}</strong>
+              <span>${item.option || "Sem opção"}</span>
+            </div>
+            <div class="staff-order-edit-qty">
+              <button data-action="staff-order-item-decrease" data-order-id="${order.id}" data-item-key="${itemKey}" aria-label="Diminuir ${item.nome}">−</button>
+              <span>${item.quantity}x</span>
+              <button data-action="staff-order-item-increase" data-order-id="${order.id}" data-item-key="${itemKey}" aria-label="Aumentar ${item.nome}">+</button>
+            </div>
+            <strong>${money(unitPrice * item.quantity)}</strong>
+            <button class="staff-order-remove" data-action="staff-order-item-remove" data-order-id="${order.id}" data-item-key="${itemKey}">Remover</button>
+          </article>
+        `;
+      }).join("") : `<p class="staff-order-empty">Este pedido está sem itens.</p>`}
+      <div class="staff-order-editor-total">
+        <span>Total</span>
+        <strong>${money(Number(order?.total || 0))}</strong>
+      </div>
     </div>
   `;
 }
@@ -1317,6 +1393,34 @@ function wireStaticFields() {
   if (notes) {
     notes.addEventListener("input", (event) => {
       state.detailNotes = event.target.value;
+    });
+  }
+
+  const staffForm = document.querySelector(".staff-login-form");
+  if (staffForm?.classList.contains("is-register")) {
+    const updateRegisterDraft = () => {
+      const formData = new FormData(staffForm);
+      state.staffRegisterDraft = {
+        firstName: cleanNamePart(formData.get("firstName")),
+        lastName: cleanNamePart(formData.get("lastName")),
+        password: String(formData.get("password") || ""),
+        managerCode: normalizePlainText(formData.get("managerCode"))
+      };
+      const preview = staffForm.querySelector("[data-username-preview]");
+      if (preview) {
+        preview.textContent = staffUsernameFromName(state.staffRegisterDraft.firstName, state.staffRegisterDraft.lastName) || "nome.sobrenome";
+      }
+      updateStaffPasswordChecklist(staffForm, state.staffRegisterDraft.password);
+    };
+
+    staffForm.addEventListener("input", updateRegisterDraft);
+  } else if (staffForm) {
+    staffForm.addEventListener("input", () => {
+      const formData = new FormData(staffForm);
+      state.staffLoginDraft = {
+        username: normalizeStaffUsername(formData.get("username")),
+        password: String(formData.get("password") || "")
+      };
     });
   }
 }
@@ -1452,6 +1556,10 @@ document.addEventListener("click", (event) => {
       state.staffModal = "order-detail";
       render();
     },
+    "staff-order-item-increase": () => updateStaffOrderItemQty(target.dataset.orderId, target.dataset.itemKey, 1),
+    "staff-order-item-decrease": () => updateStaffOrderItemQty(target.dataset.orderId, target.dataset.itemKey, -1),
+    "staff-order-item-remove": () => removeStaffOrderItem(target.dataset.orderId, target.dataset.itemKey),
+    "save-order-items": () => saveStaffOrderItems(),
     "staff-table-detail": () => {
       state.staffModal = "table-detail";
       render();
@@ -1603,6 +1711,39 @@ async function advanceOrder(orderId) {
 
   order.status = nextStatus;
   render();
+}
+
+async function saveStaffOrderItems() {
+  const order = selectedStaffOrder();
+  if (!order) return;
+  if (!order.items?.length) {
+    showToast("O pedido precisa ter pelo menos um item.");
+    return;
+  }
+
+  if (/^\d+$/.test(String(order.id))) {
+    const data = await apiRequest(`/api/orders/${order.id}/items`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        items: order.items.map((item) => ({
+          product_id: item.product_id || item.productId || "",
+          nome: item.nome,
+          option: item.option || "",
+          quantity: Number(item.quantity || 1),
+          unit_price: Number(item.unit_price || item.preco || 0),
+          notes: item.notes || ""
+        }))
+      })
+    });
+
+    if (data?.order) {
+      await syncOrders();
+    }
+  }
+
+  state.staffModal = null;
+  render();
+  showToast("Pedido atualizado.");
 }
 
 function parseMoneyInput(value) {

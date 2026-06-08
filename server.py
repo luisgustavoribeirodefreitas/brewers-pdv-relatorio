@@ -45,16 +45,6 @@ SEED_PRODUCTS = [
     ("brownie-artesanal", "Brownie artesanal", "Doces", "Brownie artesanal de chocolate amargo.", 10.0, "", [], "assets/brownie-artesanal.png", "3 — Detalhe / Brownie Artesanal"),
 ]
 
-SEED_ORDERS = [
-    ("Mesa 3", "Cappuccino × 2, Pão de queijo", "14:31", "Novo", [("capuccino-italiano", "Cappuccino", "", 2, 14.0), ("pao-de-queijo", "Pão de queijo", "", 1, 5.0)]),
-    ("Mesa 7", "Cold Brew × 1, Croissant × 1", "14:28", "Em preparo", [("cold-brew", "Cold Brew", "Com limão", 1, 17.0), ("misto-quente", "Croissant", "", 1, 12.0)]),
-    ("Mesa 1", "Espresso × 3", "14:27", "Novo", [("espresso", "Espresso", "", 3, 8.0)]),
-    ("Mesa 5", "Latte × 2, Bolo de laranja × 2", "14:20", "Em preparo", [("latte", "Latte", "Integral", 2, 12.0), ("bolo-de-cenoura", "Bolo de laranja", "", 2, 12.0)]),
-    ("Mesa 9", "Mocha × 1, Affogato × 1", "14:15", "Pronto", [("mocaccino", "Mocha", "Integral", 1, 15.0), ("trufa-de-chocolate", "Affogato", "", 1, 10.0)]),
-    ("Mesa 2", "Flat White × 2", "14:10", "Entregue", [("latte-macchiato", "Flat White", "Integral", 2, 14.0)]),
-]
-
-
 def connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -137,23 +127,6 @@ def init_db():
                 """,
                 [(p[0], p[1], p[2], p[3], p[4], p[5], json.dumps(p[6], ensure_ascii=False), p[7], p[8]) for p in SEED_PRODUCTS],
             )
-
-        if conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0:
-            for mesa, _summary, hora, status, items in SEED_ORDERS:
-                subtotal = sum(qty * price for *_rest, qty, price in items)
-                service = round(subtotal * 0.1, 2)
-                cur = conn.execute(
-                    "INSERT INTO orders (mesa, status, hora, subtotal, service, total, notes) VALUES (?, ?, ?, ?, ?, ?, '')",
-                    (mesa, status, hora, subtotal, service, subtotal + service),
-                )
-                order_id = cur.lastrowid
-                conn.executemany(
-                    """
-                    INSERT INTO order_items (order_id, product_id, nome, option_text, quantity, unit_price, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, '')
-                    """,
-                    [(order_id, product_id, nome, option, qty, price) for product_id, nome, option, qty, price in items],
-                )
 
         if conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0] == 0:
             conn.executemany(
@@ -375,6 +348,9 @@ class BrewersHandler(SimpleHTTPRequestHandler):
         with connect() as conn:
             if method == "POST" and path == "/api/orders":
                 self.create_order(conn, body)
+            elif method == "PATCH" and path.startswith("/api/orders/") and path.endswith("/items"):
+                order_id = int(path.split("/")[3])
+                self.update_order_items(conn, order_id, body)
             elif method == "PATCH" and path.startswith("/api/orders/") and path.endswith("/status"):
                 order_id = int(path.split("/")[3])
                 self.update_order_status(conn, order_id, body)
@@ -511,6 +487,50 @@ class BrewersHandler(SimpleHTTPRequestHandler):
             idx = min(STATUSES.index(current) + 1, len(STATUSES) - 1)
             next_status = STATUSES[idx]
         conn.execute("UPDATE orders SET status = ? WHERE id = ?", (next_status, order_id))
+        row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        self.send_json({"order": order_from_row(conn, row)})
+
+    def update_order_items(self, conn, order_id, body):
+        row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        if not row:
+            self.send_json({"error": "Pedido não encontrado"}, 404)
+            return
+
+        items = body.get("items", [])
+        if not items:
+            self.send_json({"error": "O pedido precisa ter pelo menos um item."}, 400)
+            return
+
+        normalized_items = []
+        for item in items:
+            quantity = max(1, int(item.get("quantity", 1)))
+            unit_price = float(item.get("unit_price", 0))
+            normalized_items.append(
+                (
+                    order_id,
+                    item.get("product_id", ""),
+                    item.get("nome", ""),
+                    item.get("option", ""),
+                    quantity,
+                    unit_price,
+                    item.get("notes", ""),
+                )
+            )
+
+        subtotal = sum(quantity * unit_price for *_prefix, quantity, unit_price, _notes in normalized_items)
+        service = round(subtotal * 0.1, 2)
+        conn.execute("DELETE FROM order_items WHERE order_id = ?", (order_id,))
+        conn.executemany(
+            """
+            INSERT INTO order_items (order_id, product_id, nome, option_text, quantity, unit_price, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            normalized_items,
+        )
+        conn.execute(
+            "UPDATE orders SET subtotal = ?, service = ?, total = ? WHERE id = ?",
+            (subtotal, service, subtotal + service, order_id),
+        )
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
         self.send_json({"order": order_from_row(conn, row)})
 

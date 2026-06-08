@@ -1227,7 +1227,7 @@ button {
 }
 
 .staff-login-form.is-register {
-  gap: 15px;
+  gap: 12px;
 }
 
 .staff-register-grid {
@@ -1285,6 +1285,63 @@ button {
 
 .staff-login-form label + label input {
   border-color: var(--color-brand);
+}
+
+.staff-register-grid label + label input {
+  border-color: var(--color-line);
+}
+
+.staff-password-checklist {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  margin: -2px 0 2px;
+  padding: 0;
+  color: var(--color-line);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.staff-password-checklist li {
+  position: relative;
+  padding-left: 18px;
+  color: #8f8174;
+}
+
+.staff-password-checklist li::before {
+  position: absolute;
+  left: 0;
+  top: -1px;
+  font-weight: 800;
+}
+
+.staff-password-checklist li.is-valid {
+  color: #fff;
+}
+
+.staff-password-checklist li.is-valid::before {
+  content: "✓";
+  color: #fff;
+}
+
+.staff-password-checklist li.is-invalid::before {
+  content: "×";
+  color: #c27325;
+}
+
+.staff-username-preview {
+  margin: 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.staff-username-preview strong {
+  color: #fff;
+  font-weight: 800;
 }
 
 .staff-login-form small {
@@ -1414,11 +1471,25 @@ button {
   color: currentColor;
 }
 
+.staff-nav-icon img {
+  position: absolute;
+  inset: 0;
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: contain;
+}
+
 .staff-nav-icon::before,
 .staff-nav-icon::after {
   content: "";
   position: absolute;
   box-sizing: border-box;
+}
+
+.staff-nav-icon.has-asset::before,
+.staff-nav-icon.has-asset::after {
+  display: none;
 }
 
 .staff-nav-icon-overview::before {
@@ -1734,6 +1805,18 @@ button {
   font-size: 13px;
 }
 
+.staff-empty-orders {
+  margin: 4px 0 0;
+  min-height: 96px;
+  border-radius: 8px;
+  background: #fff;
+  color: #8b7b6b;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .table-pill {
   min-height: 32px;
   border-radius: 8px;
@@ -1806,6 +1889,110 @@ button {
   font-size: 12px;
   background: var(--color-surface-muted);
   color: var(--color-brand-dark);
+}
+
+.staff-order-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.staff-order-editor-head,
+.staff-order-editor-total,
+.staff-order-edit-row {
+  border-radius: 8px;
+  background: rgba(243, 238, 229, 0.72);
+}
+
+.staff-order-editor-head,
+.staff-order-editor-total {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+}
+
+.staff-order-editor-head span,
+.staff-order-editor-total span {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.staff-order-edit-row {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 98px 88px 82px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.staff-order-edit-row div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.staff-order-edit-row div:first-child strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-order-edit-row div:first-child span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.staff-order-edit-qty {
+  display: grid;
+  grid-template-columns: 28px 34px 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.staff-order-edit-qty button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.staff-order-edit-qty button:first-child {
+  background: #bfbfbf;
+}
+
+.staff-order-edit-qty span {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.staff-order-remove {
+  min-height: 30px;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid rgba(194, 115, 37, 0.35);
+  color: var(--color-brand);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.staff-order-empty {
+  margin: 0;
+  min-height: 64px;
+  border-radius: 8px;
+  background: rgba(243, 238, 229, 0.72);
+  color: var(--color-muted);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
 }
 
 .tables-grid {
