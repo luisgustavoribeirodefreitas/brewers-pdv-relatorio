@@ -1896,6 +1896,14 @@ button {
   gap: 12px;
 }
 
+.staff-order-items-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: calc(4 * 66px + 3 * 12px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 .staff-order-editor-head,
 .staff-order-editor-total,
 .staff-order-edit-row {
@@ -2343,17 +2351,19 @@ button {
   gap: 14px;
   margin-bottom: 14px;
   overflow-x: hidden;
+  max-height: calc(4 * 84px + 3 * 14px);
+  overflow-y: auto;
 }
 
 .checkout-item {
-  min-height: 70px;
+  min-height: 84px;
   border-radius: 8px;
   background: var(--color-surface-muted);
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 10px;
   position: relative;
   overflow: hidden;
 }

@@ -1,4 +1,8 @@
 const categories = ["Bebidas Quentes", "Bebidas Geladas", "Salgados", "Doces"];
+const staffTables = Array.from({ length: 12 }, (_, i) => `Mesa ${i + 1}`);
+function randomTable() {
+  return staffTables[Math.floor(Math.random() * staffTables.length)];
+}
 const productDisplayOrder = {
   "Bebidas Quentes": ["espresso", "cafe-coado", "capuccino-italiano", "latte", "mocaccino", "espresso-macchiato", "latte-macchiato"],
   "Bebidas Geladas": ["mocaccino-gelado", "latte-machiatto-gelado", "latte-gelado", "capuccino-gelado", "cold-brew"],
@@ -334,6 +338,7 @@ clearLegacyStaffStorage();
 
 const state = {
   view: window.location.hash === "#atendente" ? "staff-login" : "welcome",
+  currentTable: randomTable(),
   category: "Bebidas Quentes",
   selectedProductId: null,
   detailQty: 1,
@@ -345,6 +350,7 @@ const state = {
   pendingDeleteId: null,
   lastOrderNumber: 42,
   selectedStaffOrderId: null,
+  staffOrderSnapshot: null,
   staffView: "overview",
   staffModal: null,
   staffLoginMode: "login",
@@ -558,6 +564,10 @@ async function bootstrap() {
 }
 
 function setView(view) {
+  if (view === "welcome") {
+    state.currentTable = randomTable();
+    state.cart = [];
+  }
   state.view = view;
   render();
 }
@@ -613,7 +623,17 @@ function render() {
   };
 
   const baseView = state.view === "checkout" ? "menu" : state.view;
-  app.innerHTML = views[baseView]();
+
+  if (baseView === "staff" && app.querySelector(".staff-sidebar")) {
+    app.querySelectorAll(".staff-nav-item").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.staffView === state.staffView);
+    });
+    const staffMain = app.querySelector(".staff-main");
+    if (staffMain) staffMain.innerHTML = renderStaffContent();
+  } else {
+    app.innerHTML = views[baseView]();
+  }
+
   renderModal();
   wireStaticFields();
   restoreScrollPositions();
@@ -626,7 +646,7 @@ function renderWelcome() {
         <div class="logo-mark" aria-hidden="true"><img src="assets/logo-brewers.svg" alt=""></div>
         <h1 class="welcome-title">BREWERS</h1>
         <div class="welcome-line"></div>
-        <p class="welcome-table">Mesa 7</p>
+        <p class="welcome-table">${state.currentTable}</p>
         <button class="primary-button" data-action="start">Toque para iniciar</button>
         <button class="staff-link" data-action="staff-login">Área do atendente</button>
       </div>
@@ -639,7 +659,7 @@ function renderHeader() {
     <header class="screen-header">
       <div class="brand-block">
         <strong class="brand-name">BREWERS</strong>
-        <span class="table-label">Mesa 7</span>
+        <span class="table-label">${state.currentTable}</span>
       </div>
       <button class="waiter-button" data-action="call">Chamar Garçom</button>
     </header>
@@ -694,7 +714,7 @@ function renderCart() {
   return `
     <aside class="cart-panel" aria-label="Pedido da mesa">
       <div class="cart-header">
-        <strong>Mesa 7</strong>
+        <strong>${state.currentTable}</strong>
         <span>${selectedItems} ${selectedItems === 1 ? "item selecionado" : "itens selecionados"}</span>
       </div>
       <div class="cart-list">
@@ -791,7 +811,7 @@ function renderCall() {
     <section class="screen call-screen" data-screen="6 — Chamar Garçom">
       <header class="screen-header">
         <button class="call-header-back" data-action="back-menu" aria-label="Voltar">←</button>
-        <span class="call-table">Mesa 7</span>
+        <span class="call-table">${state.currentTable}</span>
       </header>
       <div class="call-center">
         <div class="bell-icon" aria-hidden="true"><img src="assets/icon-bell.svg" alt=""></div>
@@ -827,7 +847,7 @@ function renderSuccess() {
         <button class="secondary-button" data-action="back-menu">Voltar ao Cardápio</button>
         <button class="secondary-button" data-action="home">Voltar ao Início</button>
       </div>
-      <p class="success-footer">Mesa 7 · Brewers Café</p>
+      <p class="success-footer">${state.currentTable} · Brewers Café</p>
     </section>
   `;
 }
@@ -983,6 +1003,8 @@ function renderStaffOverview() {
   const prep = state.staffOrders.filter((order) => order.status === "Em preparo").length;
   const delivered = state.staffOrders.filter((order) => order.status === "Entregue").length;
   const todayOrders = state.staffOrders.length;
+  const activeTables = new Set(state.staffOrders.map((o) => o.mesa)).size;
+  const totalTables = staffTables.length;
   const cashLabel = state.cashOpen ? "Caixa aberto" : "Abrir Caixa";
   return `
     ${renderStaffHeader("Pedidos em Aberto", "Segunda-feira, 13 de Abril · 14:32", `
@@ -993,7 +1015,7 @@ function renderStaffOverview() {
       <article><strong>${todayOrders}</strong><span>Pedidos Hoje</span></article>
       <article><strong class="warn">${prep}</strong><span>Em Preparo</span></article>
       <article><strong class="ok">${delivered}</strong><span>Entregues</span></article>
-      <article><strong class="dark">6/12</strong><span>Mesas Ativas</span></article>
+      <article><strong class="dark">${activeTables}/${totalTables}</strong><span>Mesas Ativas</span></article>
     </section>
     ${renderOrdersTable(state.staffOrders)}
   `;
@@ -1031,11 +1053,10 @@ function statusClass(status) {
 }
 
 function renderStaffTables() {
-  const tables = ["Mesa 1", "Mesa 2", "Mesa 3", "Mesa 4", "Mesa 5", "Mesa 6", "Mesa 7", "Mesa 8", "Mesa 9"];
   return `
     ${renderStaffHeader("Mesas", "", `<button class="staff-primary small" data-action="new-order">Novo Pedido</button>`)}
     <section class="tables-grid">
-      ${tables.map((table) => `
+      ${staffTables.map((table) => `
         <button class="table-card" data-action="staff-table-detail" data-table="${table}">
           <span>${table}</span>
         </button>
@@ -1360,25 +1381,27 @@ function renderOrderFlowBody() {
         <span>${order?.mesa || "Mesa"}</span>
         <strong>${order?.status || "Novo"}</strong>
       </div>
-      ${items.length ? items.map((item, index) => {
-        const itemKey = staffOrderItemKey(item, index);
-        const unitPrice = Number(item.unit_price || item.preco || 0);
-        return `
-          <article class="staff-order-edit-row">
-            <div>
-              <strong>${item.nome}</strong>
-              <span>${item.option || "Sem opção"}</span>
-            </div>
-            <div class="staff-order-edit-qty">
-              <button data-action="staff-order-item-decrease" data-order-id="${order.id}" data-item-key="${itemKey}" aria-label="Diminuir ${item.nome}">−</button>
-              <span>${item.quantity}x</span>
-              <button data-action="staff-order-item-increase" data-order-id="${order.id}" data-item-key="${itemKey}" aria-label="Aumentar ${item.nome}">+</button>
-            </div>
-            <strong>${money(unitPrice * item.quantity)}</strong>
-            <button class="staff-order-remove" data-action="staff-order-item-remove" data-order-id="${order.id}" data-item-key="${itemKey}">Remover</button>
-          </article>
-        `;
-      }).join("") : `<p class="staff-order-empty">Este pedido está sem itens.</p>`}
+      <div class="staff-order-items-scroll">
+        ${items.length ? items.map((item, index) => {
+          const itemKey = staffOrderItemKey(item, index);
+          const unitPrice = Number(item.unit_price || item.preco || 0);
+          return `
+            <article class="staff-order-edit-row">
+              <div>
+                <strong>${item.nome}</strong>
+                <span>${item.option || "Sem opção"}</span>
+              </div>
+              <div class="staff-order-edit-qty">
+                <button data-action="staff-order-item-decrease" data-order-id="${order.id}" data-item-key="${itemKey}" aria-label="Diminuir ${item.nome}">−</button>
+                <span>${item.quantity}x</span>
+                <button data-action="staff-order-item-increase" data-order-id="${order.id}" data-item-key="${itemKey}" aria-label="Aumentar ${item.nome}">+</button>
+              </div>
+              <strong>${money(unitPrice * item.quantity)}</strong>
+              <button class="staff-order-remove" data-action="staff-order-item-remove" data-order-id="${order.id}" data-item-key="${itemKey}">Remover</button>
+            </article>
+          `;
+        }).join("") : `<p class="staff-order-empty">Este pedido está sem itens.</p>`}
+      </div>
       <div class="staff-order-editor-total">
         <span>Total</span>
         <strong>${money(Number(order?.total || 0))}</strong>
@@ -1542,6 +1565,14 @@ document.addEventListener("click", (event) => {
       render();
     },
     "close-staff-modal": () => {
+      if ((state.staffModal === "order-detail" || state.staffModal === "table-detail") && state.staffOrderSnapshot) {
+        const order = selectedStaffOrder();
+        if (order) {
+          order.items = state.staffOrderSnapshot.items;
+          order.total = state.staffOrderSnapshot.total;
+        }
+        state.staffOrderSnapshot = null;
+      }
       state.staffModal = null;
       render();
     },
@@ -1552,6 +1583,10 @@ document.addEventListener("click", (event) => {
     "advance-order": () => advanceOrder(target.dataset.orderId),
     "staff-order-detail": () => {
       state.selectedStaffOrderId = target.dataset.orderId;
+      const order = state.staffOrders.find((o) => String(o.id) === String(target.dataset.orderId));
+      if (order) {
+        state.staffOrderSnapshot = JSON.parse(JSON.stringify({ items: order.items, total: order.total }));
+      }
       state.staffModal = "order-detail";
       render();
     },
@@ -1740,6 +1775,7 @@ async function saveStaffOrderItems() {
     }
   }
 
+  state.staffOrderSnapshot = null;
   state.staffModal = null;
   render();
   showToast("Pedido atualizado.");
@@ -1765,7 +1801,7 @@ function slugify(value) {
 function localOrderFromCart(cartItems) {
   return {
     id: `local-${Date.now()}`,
-    mesa: "Mesa 7",
+    mesa: state.currentTable,
     itens: cartItems.map((item) => `${item.nome} x ${item.quantity}`).join(", "),
     hora: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     status: "Novo",
@@ -1777,7 +1813,7 @@ async function finalizeOrder() {
   if (!state.cart.length) return;
   const cartItems = state.cart.map((item) => ({ ...item }));
   const payload = {
-    mesa: "Mesa 7",
+    mesa: state.currentTable,
     items: cartItems.map((item) => ({
       product_id: item.productId,
       nome: item.nome,
