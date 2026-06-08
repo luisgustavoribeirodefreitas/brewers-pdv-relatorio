@@ -1,16 +1,30 @@
 const categories = ["Bebidas Quentes", "Bebidas Geladas", "Salgados", "Doces"];
+const productDisplayOrder = {
+  "Bebidas Quentes": ["espresso", "cafe-coado", "capuccino-italiano", "latte", "mocaccino", "espresso-macchiato", "latte-macchiato"],
+  "Bebidas Geladas": ["mocaccino-gelado", "latte-machiatto-gelado", "latte-gelado", "capuccino-gelado", "cold-brew"],
+  Salgados: ["misto-quente", "pao-na-chapa", "pao-de-queijo"],
+  Doces: ["brownie-artesanal", "bolo-de-cenoura", "trufa-de-chocolate"]
+};
 const staffNav = [
-  { id: "overview", label: "Visão Geral", icon: "▣" },
-  { id: "orders", label: "Pedidos", icon: "▤" },
-  { id: "clients", label: "Clientes", icon: "●" },
-  { id: "reports", label: "Relatórios", icon: "▥" },
-  { id: "menu", label: "Cardápio", icon: "◫" },
-  { id: "settings", label: "Configurações", icon: "⚙" }
+  { id: "overview", label: "Visão Geral", icon: "overview" },
+  { id: "orders", label: "Pedidos", icon: "orders" },
+  { id: "clients", label: "Clientes", icon: "clients" },
+  { id: "reports", label: "Relatórios", icon: "reports" },
+  { id: "menu", label: "Cardápio", icon: "menu" },
+  { id: "settings", label: "Configurações", icon: "settings" }
 ];
-
 const orderStatusFlow = ["Novo", "Em preparo", "Pronto", "Entregue"];
+const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
+let apiOnline = false;
+const STAFF_MASTER_CODES = {
+  482917: "Luis",
+  736204: "Bianca",
+  159683: "Ana",
+  904571: "Carol"
+};
+const LEGACY_STAFF_STORAGE_KEYS = ["brewersStaffUsers", "brewersStaffSession"];
 
-const products = [
+let products = [
   {
     id: "espresso",
     nome: "Espresso",
@@ -212,6 +226,90 @@ const products = [
   }
 ];
 
+function normalizePlainText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeStaffUsername(value) {
+  return normalizePlainText(value)
+    .replace(/^@+/, "")
+    .replace(/@brewers$/, "")
+    .replace(/\s+/g, ".")
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^[._-]+|[._-]+$/g, "");
+}
+
+function staffUsernameFromName(firstName, lastName) {
+  const name = staffCompactNameFromParts(firstName, lastName);
+  return normalizeStaffUsername(`${name.first}.${name.last}`);
+}
+
+function cleanNamePart(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function staffCompactNameFromParts(firstName, lastName) {
+  const tokens = `${cleanNamePart(firstName)} ${cleanNamePart(lastName)}`
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const first = tokens[0] || "";
+  const last = tokens.length > 1 ? tokens[tokens.length - 1] : "";
+  return { first, last };
+}
+
+function clearLegacyStaffStorage() {
+  try {
+    LEGACY_STAFF_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // O cadastro do atendente agora vive apenas no SQLite.
+  }
+}
+
+function validateStaffPassword(password) {
+  if (password.length < 6) return "A senha deve ter no mínimo 6 caracteres.";
+  if (!/[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(password)) return "A senha deve conter pelo menos uma letra maiúscula.";
+  if (!/[a-záéíóúâêôãõç]/.test(password)) return "A senha deve conter pelo menos uma letra minúscula.";
+  if (!/\d/.test(password)) return "A senha deve conter pelo menos um número.";
+  if (!/[^A-Za-zÀ-ÿ0-9]/.test(password)) return "A senha deve conter pelo menos um caractere especial.";
+  return "";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[char]));
+}
+
+function staffDisplayName(user) {
+  const { first: firstName, last: lastName } = staffCompactNameFromParts(user?.firstName, user?.lastName);
+  return `${firstName} ${lastName}`.trim() || user?.username || "Atendente Brewers";
+}
+
+function staffSubtitle(user) {
+  return user?.subtitle || (user?.authorizedBy ? `Autorizado por ${user.authorizedBy}` : "Equipe Brewers");
+}
+
+function staffInitials(user) {
+  const { first: firstName, last: lastName } = staffCompactNameFromParts(user?.firstName, user?.lastName);
+  const nameParts = [firstName, lastName].filter(Boolean);
+  const initials = nameParts.map((part) => Array.from(part)[0]).join("").slice(0, 2);
+  return initials.toUpperCase() || "BR";
+}
+
+clearLegacyStaffStorage();
+
 const state = {
   view: window.location.hash === "#atendente" ? "staff-login" : "welcome",
   category: "Bebidas Quentes",
@@ -219,10 +317,27 @@ const state = {
   detailQty: 1,
   detailOption: "",
   detailNotes: "",
+  editCartId: null,
+  editReturnView: null,
   selectedReason: "Tirar dúvidas",
   pendingDeleteId: null,
+  lastOrderNumber: 42,
+  selectedStaffOrderId: null,
   staffView: "overview",
   staffModal: null,
+  staffLoginMode: "login",
+  staffLoginError: "",
+  staffLoginDraft: {
+    username: "",
+    password: ""
+  },
+  staffRegisterDraft: {
+    firstName: "",
+    lastName: "",
+    password: "",
+    managerCode: ""
+  },
+  staffUser: null,
   cashOpen: false,
   toast: "",
   staffOrders: [
@@ -233,10 +348,16 @@ const state = {
     { id: "p9", mesa: "Mesa 9", itens: "Mocha × 1, Affogato × 1", hora: "14:15", status: "Pronto" },
     { id: "p2", mesa: "Mesa 2", itens: "Flat White × 2", hora: "14:10", status: "Entregue" }
   ],
-  cart: [
-    makeCartItem("capuccino-italiano", "Leite Integral", 1),
-    makeCartItem("capuccino-italiano", "Leite Vegetal", 1)
-  ]
+  staffClients: [
+    { nome: "Luis Gustavo Freitas", cpf: "123.xxx.xxx-52", celular: "(43) 9 1644-4645", nascimento: "13/03/2007", endereco: "R. Marialvence, 140, Maringa, Parana" },
+    { nome: "Maria Lucia Gonzaga", cpf: "158.xxx.xxx-90", celular: "(44) 9 5516-6358", nascimento: "25/12/1996", endereco: "R. Mario e Luigi, 6, Maringa, Parana" }
+  ],
+  cart: [],
+  scroll: {
+    menuByCategory: {},
+    cart: 0,
+    staffMain: 0
+  }
 };
 
 const app = document.querySelector("#app");
@@ -266,7 +387,22 @@ function optionPrice(option) {
 
 function imageStyle(productOrPath) {
   const path = typeof productOrPath === "string" ? productOrPath : productOrPath.imagem;
-  return `background-image: linear-gradient(135deg, rgba(184,114,42,.22), rgba(30,15,5,.12)), url("${path}")`;
+  return `background-image: url("${path}")`;
+}
+
+function cardImageStyle(product) {
+  const imageY = product.categoria?.includes("Bebidas") ? "0%" : "48%";
+  return `background-image: url("assets/thumbs/${product.id}.png"); --card-image-y: ${imageY}`;
+}
+
+function thumbImageStyle(productOrItem) {
+  const id = productOrItem?.id || productOrItem?.productId;
+  return id ? `background-image: url("assets/thumbs/${id}.png")` : "";
+}
+
+function imagePath(productOrPath) {
+  if (!productOrPath) return "assets/logo-brewers.svg";
+  return typeof productOrPath === "string" ? productOrPath : productOrPath.imagem;
 }
 
 function totals() {
@@ -279,12 +415,145 @@ function productById(id) {
   return products.find((product) => product.id === id);
 }
 
+function productsByCategory(category) {
+  const order = productDisplayOrder[category] || [];
+  return products
+    .filter((product) => product.categoria === category)
+    .sort((a, b) => {
+      const aIndex = order.indexOf(a.id);
+      const bIndex = order.indexOf(b.id);
+      if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex;
+      if (aIndex >= 0) return -1;
+      if (bIndex >= 0) return 1;
+      return a.nome.localeCompare(b.nome, "pt-BR");
+    });
+}
+
+function orderFromApi(order) {
+  return {
+    id: String(order.id),
+    mesa: order.mesa,
+    itens: order.items_summary || (order.items || []).map((item) => `${item.nome} x ${item.quantity}`).join(", "),
+    hora: order.hora,
+    status: order.status,
+    total: order.total,
+    items: order.items || []
+  };
+}
+
+function selectedStaffOrder() {
+  return state.staffOrders.find((order) => order.id === state.selectedStaffOrderId) || state.staffOrders[0];
+}
+
+async function apiRequest(path, options = {}) {
+  const requestOptions = {
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {})
+    }
+  };
+
+  try {
+    const response = await fetch(`${API_BASE}${path}`, requestOptions);
+    apiOnline = response.ok;
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    apiOnline = false;
+    return null;
+  }
+}
+
+async function staffAuthRequest(path, payload) {
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    apiOnline = true;
+    return { ok: response.ok, data };
+  } catch {
+    apiOnline = false;
+    return {
+      ok: false,
+      data: { error: "Servidor local indisponível. Reinicie o servidor para usar o login pelo banco de dados." }
+    };
+  }
+}
+
+async function syncProducts() {
+  const data = await apiRequest("/api/products");
+  if (data?.products?.length) products = data.products;
+}
+
+async function syncOrders() {
+  const data = await apiRequest("/api/orders");
+  if (data?.orders) state.staffOrders = data.orders.map(orderFromApi);
+}
+
+async function syncClients() {
+  const data = await apiRequest("/api/clients");
+  if (data?.clients) state.staffClients = data.clients;
+}
+
+async function syncCash() {
+  const data = await apiRequest("/api/cash");
+  if (data) state.cashOpen = Boolean(data.is_open);
+}
+
+async function bootstrap() {
+  await Promise.all([syncProducts(), syncOrders(), syncClients(), syncCash()]);
+  render();
+}
+
 function setView(view) {
   state.view = view;
   render();
 }
 
+function currentCategoryFromDom() {
+  return document.querySelector(".category-tab.is-active")?.textContent.trim() || state.category;
+}
+
+function captureScrollPositions() {
+  const productGrid = document.querySelector(".product-grid");
+  const cartList = document.querySelector(".cart-list");
+  const staffMain = document.querySelector(".staff-main");
+
+  if (productGrid) {
+    state.scroll.menuByCategory[currentCategoryFromDom()] = productGrid.scrollTop;
+  }
+  if (cartList) {
+    state.scroll.cart = cartList.scrollTop;
+  }
+  if (staffMain) {
+    state.scroll.staffMain = staffMain.scrollTop;
+  }
+}
+
+function restoreScrollPositions() {
+  window.requestAnimationFrame(() => {
+    const productGrid = document.querySelector(".product-grid");
+    const cartList = document.querySelector(".cart-list");
+    const staffMain = document.querySelector(".staff-main");
+
+    if (productGrid) {
+      productGrid.scrollTop = state.scroll.menuByCategory[state.category] || 0;
+    }
+    if (cartList) {
+      cartList.scrollTop = state.scroll.cart || 0;
+    }
+    if (staffMain) {
+      staffMain.scrollTop = state.scroll.staffMain || 0;
+    }
+  });
+}
+
 function render() {
+  captureScrollPositions();
   const views = {
     welcome: renderWelcome,
     menu: renderMenu,
@@ -299,13 +568,14 @@ function render() {
   app.innerHTML = views[baseView]();
   renderModal();
   wireStaticFields();
+  restoreScrollPositions();
 }
 
 function renderWelcome() {
   return `
     <section class="screen welcome-screen" data-screen="1 — Boas-vindas">
       <div class="welcome-card">
-        <div class="logo-mark" aria-hidden="true">☕</div>
+        <div class="logo-mark" aria-hidden="true"><img src="assets/logo-brewers.svg" alt=""></div>
         <h1 class="welcome-title">BREWERS</h1>
         <div class="welcome-line"></div>
         <p class="welcome-table">Mesa 7</p>
@@ -329,7 +599,7 @@ function renderHeader() {
 }
 
 function renderMenu() {
-  const currentProducts = products.filter((product) => product.categoria === state.category);
+  const currentProducts = productsByCategory(state.category);
   return `
     <section class="screen menu-screen" data-screen="2 — Cardápio / ${state.category}">
       ${renderHeader()}
@@ -357,7 +627,7 @@ function renderProductCard(product) {
   const desc = product.tamanho ? `${product.descricao} (${product.tamanho})` : product.descricao;
   return `
     <article class="product-card" data-product="${product.id}">
-      <div class="product-image" style='${imageStyle(product)}'><span aria-hidden="true">☕</span></div>
+      <div class="product-image" style='${cardImageStyle(product)}'></div>
       <div class="product-body">
         <div class="product-copy">
           <h3 class="product-name">${product.nome}</h3>
@@ -371,16 +641,16 @@ function renderProductCard(product) {
 }
 
 function renderCart() {
-  const totalItems = state.cart.reduce((sum, item) => sum + item.quantity, 0);
+  const selectedItems = state.cart.length;
   const values = totals();
   return `
     <aside class="cart-panel" aria-label="Pedido da mesa">
       <div class="cart-header">
         <strong>Mesa 7</strong>
-        <span>${totalItems} ${totalItems === 1 ? "item selecionado" : "Itens selecionados"}</span>
+        <span>${selectedItems} ${selectedItems === 1 ? "item selecionado" : "itens selecionados"}</span>
       </div>
       <div class="cart-list">
-        ${state.cart.length ? state.cart.map(renderCartItem).join("") : `<p class="empty-cart">Nenhum item selecionado.</p>`}
+        ${state.cart.length ? state.cart.map((item) => renderCartItem(item)).join("") : `<p class="empty-cart">Nenhum item selecionado.</p>`}
       </div>
       <div class="cart-summary">
         <div class="summary-row"><span>Subtotal</span><strong>${money(values.subtotal)}</strong></div>
@@ -395,16 +665,19 @@ function renderCart() {
 function renderCartItem(item, compact = false) {
   const product = productById(item.productId);
   const className = compact ? "checkout-item" : "cart-item";
+  const editAttrs = `data-action="edit-cart" role="button" tabindex="0" aria-label="Editar ${item.nome}"`;
   return `
-    <article class="${className}" data-cart-id="${item.uid}">
-      <div class="cart-thumb" style='${imageStyle(product)}'></div>
-      <div>
+    <article class="${className}" data-cart-id="${item.uid}" ${editAttrs}>
+      <div class="cart-thumb" style='${thumbImageStyle(product || item)}'></div>
+      <div class="cart-item-copy">
         <h3 class="cart-item-title">${item.nome}</h3>
         <p class="cart-item-option">${item.option || "Sem opção"}</p>
         ${renderQtyControl(item)}
       </div>
       <p class="cart-item-price">${money(item.preco * item.quantity)}</p>
-      <button class="remove-button" aria-label="Remover ${item.nome}" data-action="request-delete" data-cart-id="${item.uid}">⌫</button>
+      <button class="remove-button" aria-label="Remover ${item.nome}" data-action="request-delete" data-cart-id="${item.uid}">
+        <img src="assets/icon-trash.svg" alt="">
+      </button>
     </article>
   `;
 }
@@ -458,7 +731,7 @@ function renderDetail() {
           <button class="qty-button plus" data-action="increase-detail" aria-label="Aumentar quantidade">+</button>
         </div>
         <p class="detail-price">${money(price)}</p>
-        <button class="primary-button" data-action="add-to-cart">Adicionar ao Pedido</button>
+        <button class="primary-button" data-action="add-to-cart">${state.editCartId ? "Atualizar Pedido" : "Adicionar ao Pedido"}</button>
       </div>
     </section>
   `;
@@ -469,11 +742,11 @@ function renderCall() {
   return `
     <section class="screen call-screen" data-screen="6 — Chamar Garçom">
       <header class="screen-header">
-        <button class="call-header-back" data-action="back-menu">← Chamar Garçom</button>
+        <button class="call-header-back" data-action="back-menu" aria-label="Voltar">←</button>
         <span class="call-table">Mesa 7</span>
       </header>
       <div class="call-center">
-        <div class="bell-icon" aria-hidden="true">&#128276;</div>
+        <div class="bell-icon" aria-hidden="true"><img src="assets/icon-bell.svg" alt=""></div>
         <h2 class="call-title">O garçom será avisado</h2>
         <p class="call-subtitle">Selecione o motivo da chamada:</p>
         <div class="reason-grid">
@@ -494,12 +767,12 @@ function renderCall() {
 function renderSuccess() {
   return `
     <section class="screen success-screen" data-screen="5 — Pedido Confirmado">
-      <div class="success-icon">✓</div>
+      <div class="success-icon"><img src="assets/icon-success.svg" alt=""></div>
       <h2 class="success-title">Pedido Enviado!</h2>
       <p class="success-copy">Seu pedido está sendo preparado com carinho.</p>
       <div class="order-number-box">
         <span>Número do Pedido</span>
-        <strong>#42</strong>
+        <strong>#${state.lastOrderNumber || 42}</strong>
       </div>
       <p class="success-time">Tempo estimado: 8–12 min</p>
       <div class="success-actions">
@@ -512,6 +785,36 @@ function renderSuccess() {
 }
 
 function renderStaffLogin() {
+  const isRegister = state.staffLoginMode === "register";
+  const loginDraft = state.staffLoginDraft;
+  const registerDraft = state.staffRegisterDraft;
+  const error = state.staffLoginError
+    ? `<div class="staff-login-error" role="alert">${escapeHtml(state.staffLoginError)}</div>`
+    : "";
+  const formBody = isRegister ? `
+        <h2>Primeiro acesso</h2>
+        <p>Crie seu acesso de funcionário</p>
+        ${error}
+        <div class="staff-register-grid">
+          <label>Nome<input name="firstName" value="${escapeHtml(registerDraft.firstName)}" autocomplete="given-name" placeholder="Ana" required></label>
+          <label>Sobrenome<input name="lastName" value="${escapeHtml(registerDraft.lastName)}" autocomplete="family-name" placeholder="Barista" required></label>
+        </div>
+        <label>Senha<input name="password" value="${escapeHtml(registerDraft.password)}" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres" required></label>
+        <label>Código do gestor master<input name="managerCode" value="${escapeHtml(registerDraft.managerCode)}" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Código de 6 dígitos" required></label>
+        <button class="staff-primary" type="submit">Criar acesso</button>
+        <button class="staff-link-button" type="button" data-action="staff-login-mode" data-mode="login">Já tenho acesso</button>
+        <small>Senha com maiúscula, minúscula, número e caractere especial</small>
+  ` : `
+        <h2>Bem-vindo</h2>
+        <p>Acesse sua conta</p>
+        ${error}
+        <label>Usuário<input name="username" value="${escapeHtml(loginDraft.username)}" autocomplete="username" placeholder="nome.sobrenome" required></label>
+        <label>Senha<input name="password" value="${escapeHtml(loginDraft.password)}" type="password" autocomplete="current-password" placeholder="Sua senha" required></label>
+        <button class="staff-primary" type="submit">Entrar</button>
+        <button class="staff-link-button" type="button" data-action="staff-login-mode" data-mode="register">Primeiro acesso</button>
+        <small>Brewers v2.1 · Somente para funcionários</small>
+  `;
+
   return `
     <section class="screen staff-login-screen" data-screen="A1 — Login">
       <div class="staff-login-left">
@@ -521,20 +824,35 @@ function renderStaffLogin() {
           <div class="staff-login-line"></div>
           <p>Controle total do seu café na palma da mão.</p>
           <ul class="staff-feature-list">
-            <li><span>▤</span>Pedidos em tempo real</li>
-            <li><span>▣</span>Gestão de mesas</li>
-            <li><span>▰</span>Fechamento de contas</li>
-            <li><span>◔</span>Relatórios do dia</li>
+            <li>
+              <span class="staff-feature-icon staff-feature-icon-orders has-asset" aria-hidden="true">
+                <img src="assets/icon-login-orders.svg" alt="" loading="eager" decoding="sync">
+              </span>
+              Pedidos em tempo real
+            </li>
+            <li>
+              <span class="staff-feature-icon staff-feature-icon-tables has-asset" aria-hidden="true">
+                <img src="assets/icon-login-tables.svg" alt="" loading="eager" decoding="sync">
+              </span>
+              Gestão de mesas
+            </li>
+            <li>
+              <span class="staff-feature-icon staff-feature-icon-billing has-asset" aria-hidden="true">
+                <img src="assets/icon-login-billing.svg" alt="" loading="eager" decoding="sync">
+              </span>
+              Fechamento de contas
+            </li>
+            <li>
+              <span class="staff-feature-icon staff-feature-icon-reports has-asset" aria-hidden="true">
+                <img src="assets/icon-login-reports.svg" alt="" loading="eager" decoding="sync">
+              </span>
+              Relatórios do dia
+            </li>
           </ul>
         </div>
       </div>
-      <form class="staff-login-form" data-action="staff-enter">
-        <h2>Bem-vindo</h2>
-        <p>Acesse sua conta</p>
-        <label>Usuário<input value="ana.barista" autocomplete="username"></label>
-        <label>Senha<input value="••••••••" type="text" autocomplete="current-password"></label>
-        <button class="staff-primary" type="submit">Entrar</button>
-        <small>Brewers v2.1 · Somente para funcionários</small>
+      <form class="staff-login-form ${isRegister ? "is-register" : ""}" novalidate>
+        ${formBody}
       </form>
     </section>
   `;
@@ -552,6 +870,9 @@ function renderStaffPanel() {
 }
 
 function renderStaffSidebar() {
+  const staffUser = state.staffUser;
+  const displayName = staffDisplayName(staffUser);
+  const subtitle = staffSubtitle(staffUser);
   return `
     <aside class="staff-sidebar">
       <div class="staff-logo">
@@ -561,14 +882,20 @@ function renderStaffSidebar() {
       <nav class="staff-nav" aria-label="Navegação do painel">
         ${staffNav.map((item) => `
           <button class="staff-nav-item ${state.staffView === item.id ? "is-active" : ""}" data-action="staff-nav" data-staff-view="${item.id}">
-            <span>${item.icon}</span>${item.label}
+            <span class="staff-nav-icon staff-nav-icon-${item.icon}" aria-hidden="true"></span>${item.label}
           </button>
         `).join("")}
       </nav>
-      <button class="staff-back-client" data-action="home">Voltar ao cliente</button>
+      <div class="staff-sidebar-actions">
+        <button class="staff-back-client" data-action="home">Voltar ao cliente</button>
+        <button class="staff-switch-user" data-action="staff-logout">Trocar usuário</button>
+      </div>
       <div class="staff-user">
-        <div>AB</div>
-        <p><strong>Ana Barista</strong><span>Turno da manhã</span></p>
+        <div>${escapeHtml(staffInitials(staffUser))}</div>
+        <p>
+          <strong title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</strong>
+          <span title="${escapeHtml(subtitle)}">${escapeHtml(subtitle)}</span>
+        </p>
       </div>
     </aside>
   `;
@@ -606,6 +933,7 @@ function renderStaffOverview() {
     ${renderStaffHeader("Pedidos em Aberto", "Segunda-feira, 13 de Abril · 14:32", `
       <button class="cash-button" data-action="${state.cashOpen ? "cash-menu" : "open-cash-modal"}">${cashLabel}<span>⌄</span></button>
     `)}
+    ${apiOnline ? "" : `<p class="offline-banner">Modo local: inicie o servidor para salvar no banco.</p>`}
     <section class="staff-stats">
       <article><strong>47</strong><span>Pedidos Hoje</span></article>
       <article><strong class="warn">${prep}</strong><span>Em Preparo</span></article>
@@ -662,10 +990,11 @@ function renderStaffTables() {
 }
 
 function renderStaffClients() {
-  const clients = [
+  let clients = [
     ["Luis Gustavo Freitas", "123.xxx.xxx-52", "(43) 9 1644-4645", "13/03/2007", "R. Marialvence, 140, Maringá, Paraná"],
     ["Maria Lucia Gonzaga", "158.xxx.xxx-90", "(44) 9 5516-6358", "25/12/1996", "R. Mario e Luigi, 6, Maringá, Paraná"]
   ];
+  clients = state.staffClients.map((client) => [client.nome, client.cpf, client.celular, client.nascimento, client.endereco]);
   return `
     ${renderStaffHeader("Clientes", "", `<button class="staff-primary small" data-action="staff-modal" data-modal="client">Cadastrar Novo</button>`)}
     <section class="staff-table client-table">
@@ -711,7 +1040,7 @@ function renderStaffMenu() {
     <section class="admin-menu-grid">
       ${products.slice(0, 12).map((product) => `
         <article>
-          <div class="product-image" style='${imageStyle(product)}'></div>
+          <div class="product-image" style='${cardImageStyle(product)}'></div>
           <strong>${product.nome}</strong>
           <span>${product.categoria}</span>
           <em>${money(product.preco)}</em>
@@ -859,15 +1188,19 @@ function renderStaffModal() {
   }
 
   if (modal === "payment-step") {
+    const order = selectedStaffOrder();
+    const total = Number(order?.total || 30.8);
+    const subtotal = total / 1.1;
+    const service = total - subtotal;
     return renderStaffDialog("Tela de Pagamento", `
       <div class="payment-summary">
-        <div><span>Subtotal</span><strong>R$ 28,00</strong></div>
-        <div><span>Taxa de serviço</span><strong>R$ 2,80</strong></div>
-        <div><span>Total</span><strong>R$ 30,80</strong></div>
+        <div><span>Subtotal</span><strong>${money(subtotal)}</strong></div>
+        <div><span>Taxa de serviço</span><strong>${money(service)}</strong></div>
+        <div><span>Total</span><strong>${money(total)}</strong></div>
       </div>
       <div class="staff-form-grid">
         <label>Forma de pagamento<select><option>Pix</option><option>Dinheiro</option><option>Crédito</option></select></label>
-        <label>Valor recebido<input value="R$ 30,80"></label>
+        <label>Valor recebido<input value="${money(total)}"></label>
       </div>
     `, `
       <button class="staff-secondary" data-action="show-toast" data-message="Conta enviada para impressão">Imprimir Conta</button>
@@ -936,7 +1269,13 @@ function renderStaffModal() {
     "new-payment": `<label class="staff-money-label">Forma de pagamento<input value="Voucher"></label>`
   };
 
-  const saveAction = modal === "cash-open" ? "save-cash-open" : modal === "fechamento" ? "save-cash-close" : "close-staff-modal";
+  const saveActions = {
+    "cash-open": "save-cash-open",
+    fechamento: "save-cash-close",
+    product: "save-product",
+    client: "save-client"
+  };
+  const saveAction = saveActions[modal] || "close-staff-modal";
   return renderStaffDialog(titles[modal] || "Painel", bodyByModal[modal] || "", `
     <button class="staff-secondary" data-action="close-staff-modal">Cancelar</button>
     <button class="staff-primary" data-action="${saveAction}">Salvar</button>
@@ -957,13 +1296,17 @@ function renderStaffDialog(title, body, footer) {
 }
 
 function renderOrderFlowBody() {
+  const order = selectedStaffOrder();
+  const items = order?.items?.length
+    ? order.items.map((item) => `<div><span>${item.nome}${item.option ? ` - ${item.option}` : ""}</span><strong>${money(item.unit_price * item.quantity)}</strong></div>`).join("")
+    : `<div><span>${order?.itens || "Cappuccino Italiano"}</span><strong>${money(order?.total || 28)}</strong></div>`;
   return `
     <div class="order-flow-tabs">
       <button class="is-active">Pedido</button><button>Cliente</button><button>Pagamento</button>
     </div>
     <div class="staff-config-list">
-      <div><span>Cappuccino Italiano</span><strong>R$ 14,00</strong></div>
-      <div><span>Pão de queijo</span><strong>R$ 5,00</strong></div>
+      <div><span>${order?.mesa || "Mesa 7"}</span><strong>${order?.status || "Novo"}</strong></div>
+      ${items}
       <div><span>Observação</span><em>Mesa próxima ao balcão.</em></div>
     </div>
   `;
@@ -979,7 +1322,7 @@ function wireStaticFields() {
 }
 
 document.addEventListener("click", (event) => {
-  const target = event.target.closest("button, [data-category], [data-option], [data-reason]");
+  const target = event.target.closest("button, [data-action], [data-category], [data-option], [data-reason]");
   if (!target) return;
 
   const action = target.dataset.action;
@@ -1022,9 +1365,26 @@ document.addEventListener("click", (event) => {
       window.location.hash = "atendente";
       setView("staff-login");
     },
+    "staff-login-mode": () => {
+      state.staffLoginMode = target.dataset.mode === "register" ? "register" : "login";
+      state.staffLoginError = "";
+      render();
+    },
     "staff-enter": () => enterStaffPanel(),
+    "staff-logout": () => {
+      state.staffUser = null;
+      state.staffLoginMode = "login";
+      state.staffLoginError = "";
+      window.location.hash = "atendente";
+      setView("staff-login");
+    },
     call: () => setView("call"),
-    "back-menu": () => setView("menu"),
+    "back-menu": () => {
+      const returnView = state.editCartId && state.editReturnView === "checkout" && state.cart.length ? "checkout" : "menu";
+      state.editCartId = null;
+      state.editReturnView = null;
+      setView(returnView);
+    },
     home: () => {
       window.location.hash = "";
       setView("welcome");
@@ -1039,6 +1399,7 @@ document.addEventListener("click", (event) => {
       render();
     },
     "add-to-cart": addCurrentProduct,
+    "edit-cart": () => openCartItemEdit(target.dataset.cartId),
     "increase-cart": () => updateCartQty(target.dataset.cartId, 1),
     "decrease-cart": () => updateCartQty(target.dataset.cartId, -1),
     "request-delete": () => {
@@ -1046,6 +1407,8 @@ document.addEventListener("click", (event) => {
       render();
     },
     "cancel-delete": () => {
+      const item = state.cart.find((entry) => entry.uid === state.pendingDeleteId);
+      if (item && item.quantity < 1) item.quantity = 1;
       state.pendingDeleteId = null;
       render();
     },
@@ -1061,10 +1424,7 @@ document.addEventListener("click", (event) => {
       }
     },
     "close-checkout": () => setView("menu"),
-    finalize: () => {
-      state.view = "success";
-      render();
-    },
+    finalize: () => finalizeOrder(),
     "notify-waiter": () => showToast(`Garçom chamado: ${state.selectedReason}`),
     "open-cash-modal": () => {
       state.staffModal = "cash-open";
@@ -1082,20 +1442,13 @@ document.addEventListener("click", (event) => {
       state.staffModal = null;
       render();
     },
-    "save-cash-open": () => {
-      state.cashOpen = true;
-      state.staffModal = null;
-      state.staffView = "overview";
-      render();
-    },
-    "save-cash-close": () => {
-      state.cashOpen = false;
-      state.staffModal = null;
-      state.staffView = "overview";
-      render();
-    },
+    "save-cash-open": () => saveCashOpen(),
+    "save-cash-close": () => saveCashClose(),
+    "save-product": () => saveProductFromModal(target),
+    "save-client": () => saveClientFromModal(target),
     "advance-order": () => advanceOrder(target.dataset.orderId),
     "staff-order-detail": () => {
+      state.selectedStaffOrderId = target.dataset.orderId;
       state.staffModal = "order-detail";
       render();
     },
@@ -1118,25 +1471,273 @@ document.addEventListener("click", (event) => {
   if (actions[action]) actions[action]();
 });
 
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const target = event.target.closest('.cart-item[data-action="edit-cart"], .checkout-item[data-action="edit-cart"]');
+  if (!target) return;
+
+  event.preventDefault();
+  openCartItemEdit(target.dataset.cartId);
+});
+
 document.addEventListener("submit", (event) => {
   if (event.target.matches(".staff-login-form")) {
     event.preventDefault();
-    enterStaffPanel();
+    if (state.staffLoginMode === "register") {
+      registerStaffUser(event.target);
+    } else {
+      loginStaffUser(event.target);
+    }
   }
 });
 
-function enterStaffPanel() {
+function setStaffLoginError(message) {
+  state.staffLoginError = message;
+  render();
+}
+
+async function loginStaffUser(form) {
+  const data = new FormData(form);
+  const username = normalizeStaffUsername(data.get("username"));
+  const password = String(data.get("password") || "");
+  state.staffLoginDraft = { username, password };
+
+  if (!username || !password) {
+    setStaffLoginError("Preencha usuário e senha.");
+    return;
+  }
+
+  const response = await staffAuthRequest("/api/staff/login", { username, password });
+  if (!response.ok) {
+    setStaffLoginError(response.data?.error || "Não foi possível entrar.");
+    return;
+  }
+
+  state.staffUser = response.data.user;
+  state.staffLoginError = "";
+  state.staffLoginDraft = { username: "", password: "" };
+  await enterStaffPanel();
+}
+
+async function registerStaffUser(form) {
+  const data = new FormData(form);
+  const firstName = cleanNamePart(data.get("firstName"));
+  const lastName = cleanNamePart(data.get("lastName"));
+  const password = String(data.get("password") || "");
+  const managerCode = normalizePlainText(data.get("managerCode"));
+  state.staffRegisterDraft = { firstName, lastName, password, managerCode };
+
+  if (!firstName || !lastName || !password || !managerCode) {
+    setStaffLoginError("Preencha nome, sobrenome, senha e código.");
+    return;
+  }
+
+  if (!/^\d{6}$/.test(managerCode)) {
+    setStaffLoginError("O código do gestor master deve ter exatamente 6 dígitos.");
+    return;
+  }
+
+  const passwordError = validateStaffPassword(password);
+  if (passwordError) {
+    setStaffLoginError(passwordError);
+    return;
+  }
+
+  const authorizedBy = STAFF_MASTER_CODES[managerCode];
+  if (!authorizedBy) {
+    setStaffLoginError("Código de gestor master inválido.");
+    return;
+  }
+
+  const username = staffUsernameFromName(firstName, lastName);
+  if (!username) {
+    setStaffLoginError("Não foi possível criar o usuário. Revise nome e sobrenome.");
+    return;
+  }
+
+  const response = await staffAuthRequest("/api/staff/register", {
+    username,
+    password,
+    firstName,
+    lastName,
+    managerCode
+  });
+  if (!response.ok) {
+    setStaffLoginError(response.data?.error || "Não foi possível criar o acesso.");
+    return;
+  }
+
+  state.staffUser = response.data.user;
+  state.staffLoginMode = "login";
+  state.staffLoginError = "";
+  state.staffRegisterDraft = { firstName: "", lastName: "", password: "", managerCode: "" };
+  await enterStaffPanel();
+}
+
+async function enterStaffPanel() {
   window.location.hash = "atendente";
   state.view = "staff";
   state.staffView = "overview";
   render();
+  await Promise.all([syncProducts(), syncOrders(), syncClients(), syncCash()]);
+  render();
 }
 
-function advanceOrder(orderId) {
+async function advanceOrder(orderId) {
   const order = state.staffOrders.find((item) => item.id === orderId);
   if (!order) return;
   const nextIndex = Math.min(orderStatusFlow.indexOf(order.status) + 1, orderStatusFlow.length - 1);
-  order.status = orderStatusFlow[nextIndex];
+  const nextStatus = orderStatusFlow[nextIndex];
+
+  if (/^\d+$/.test(orderId)) {
+    const data = await apiRequest(`/api/orders/${orderId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: nextStatus })
+    });
+    if (data?.order) {
+      await syncOrders();
+      render();
+      return;
+    }
+  }
+
+  order.status = nextStatus;
+  render();
+}
+
+function parseMoneyInput(value) {
+  const normalized = String(value || "")
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  return Number.parseFloat(normalized) || 0;
+}
+
+function slugify(value) {
+  return String(value || "produto")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || `produto-${Date.now()}`;
+}
+
+function localOrderFromCart(cartItems) {
+  return {
+    id: `local-${Date.now()}`,
+    mesa: "Mesa 7",
+    itens: cartItems.map((item) => `${item.nome} x ${item.quantity}`).join(", "),
+    hora: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    status: "Novo",
+    items: cartItems
+  };
+}
+
+async function finalizeOrder() {
+  if (!state.cart.length) return;
+  const cartItems = state.cart.map((item) => ({ ...item }));
+  const payload = {
+    mesa: "Mesa 7",
+    items: cartItems.map((item) => ({
+      product_id: item.productId,
+      nome: item.nome,
+      option: item.option,
+      quantity: item.quantity,
+      unit_price: item.preco,
+      notes: item.notes || ""
+    }))
+  };
+
+  const data = await apiRequest("/api/orders", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  if (data?.order) {
+    state.lastOrderNumber = data.order.id;
+    await syncOrders();
+  } else {
+    const localOrder = localOrderFromCart(cartItems);
+    state.lastOrderNumber = localOrder.id.replace("local-", "");
+    state.staffOrders = [localOrder, ...state.staffOrders];
+  }
+
+  state.cart = [];
+  state.view = "success";
+  render();
+}
+
+async function saveCashOpen() {
+  const input = document.querySelector(".staff-dialog input");
+  const balance = parseMoneyInput(input?.value);
+  const data = await apiRequest("/api/cash/open", {
+    method: "POST",
+    body: JSON.stringify({ balance })
+  });
+
+  state.cashOpen = data ? Boolean(data.is_open) : true;
+  state.staffModal = null;
+  state.staffView = "overview";
+  render();
+}
+
+async function saveCashClose() {
+  const data = await apiRequest("/api/cash/close", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  state.cashOpen = data ? Boolean(data.is_open) : false;
+  state.staffModal = null;
+  state.staffView = "overview";
+  render();
+}
+
+async function saveProductFromModal(target) {
+  const dialog = target.closest(".staff-dialog");
+  const inputs = [...dialog.querySelectorAll("input")];
+  const category = dialog.querySelector("select")?.value || "Bebidas Quentes";
+  const nome = inputs[0]?.value.trim() || "Novo produto";
+  const preco = parseMoneyInput(inputs[1]?.value);
+  const imagem = inputs[2]?.value.trim();
+  const product = {
+    id: slugify(nome),
+    nome,
+    categoria: category,
+    descricao: "Produto cadastrado pelo painel.",
+    preco,
+    tamanho: "",
+    opcoes: [],
+    imagem: imagem && imagem !== "Selecionar arquivo" ? imagem : "assets/placeholder.png",
+    frame: "Cadastro do atendente"
+  };
+
+  await apiRequest("/api/products", {
+    method: "POST",
+    body: JSON.stringify(product)
+  });
+  products = [product, ...products.filter((item) => item.id !== product.id)];
+  state.staffModal = null;
+  render();
+}
+
+async function saveClientFromModal(target) {
+  const dialog = target.closest(".staff-dialog");
+  const inputs = [...dialog.querySelectorAll("input")];
+  const client = {
+    nome: inputs[0]?.value.trim() || "Novo cliente",
+    cpf: inputs[1]?.value.trim() || "",
+    celular: inputs[2]?.value.trim() || "",
+    nascimento: inputs[3]?.value.trim() || "",
+    endereco: inputs[4]?.value.trim() || ""
+  };
+
+  await apiRequest("/api/clients", {
+    method: "POST",
+    body: JSON.stringify(client)
+  });
+  state.staffClients = [client, ...state.staffClients];
+  state.staffModal = null;
   render();
 }
 
@@ -1146,13 +1747,70 @@ function openDetail(productId) {
   state.detailQty = 1;
   state.detailOption = product.opcoes[0] || "";
   state.detailNotes = "";
+  state.editCartId = null;
+  state.editReturnView = null;
+  setView("detail");
+}
+
+function openCartItemEdit(cartId) {
+  const item = state.cart.find((entry) => entry.uid === cartId);
+  const product = item ? productById(item.productId) : null;
+  if (!item || !product) return;
+
+  state.selectedProductId = item.productId;
+  state.detailQty = item.quantity;
+  state.detailOption = item.option || product.opcoes[0] || "";
+  state.detailNotes = item.notes || "";
+  state.editCartId = item.uid;
+  state.editReturnView = state.view === "checkout" ? "checkout" : "menu";
   setView("detail");
 }
 
 function addCurrentProduct() {
   const product = productById(state.selectedProductId);
   const option = state.detailOption || product.opcoes[0] || "";
-  state.cart.push(makeCartItem(product.id, option, state.detailQty, state.detailNotes));
+  const notes = state.detailNotes.trim();
+  const editingId = state.editCartId;
+  const isSameConfiguration = (item) =>
+    item.productId === product.id &&
+    item.option === option &&
+    (item.notes || "").trim() === notes;
+
+  if (editingId) {
+    const nextView = state.editReturnView === "checkout" && state.cart.length ? "checkout" : "menu";
+    const editedItem = state.cart.find((item) => item.uid === editingId);
+    const matchingItem = state.cart.find((item) => item.uid !== editingId && isSameConfiguration(item));
+
+    if (matchingItem) {
+      matchingItem.quantity += state.detailQty;
+      state.cart = state.cart.filter((item) => item.uid !== editingId);
+    } else if (editedItem) {
+      Object.assign(editedItem, {
+        productId: product.id,
+        nome: product.nome,
+        preco: product.preco + optionPrice(option),
+        imagem: product.imagem,
+        option,
+        quantity: state.detailQty,
+        notes
+      });
+    } else {
+      state.cart.push(makeCartItem(product.id, option, state.detailQty, notes));
+    }
+
+    state.editCartId = null;
+    state.editReturnView = null;
+    setView(nextView);
+    return;
+  }
+
+  const existingItem = state.cart.find(isSameConfiguration);
+
+  if (existingItem) {
+    existingItem.quantity += state.detailQty;
+  } else {
+    state.cart.push(makeCartItem(product.id, option, state.detailQty, notes));
+  }
   setView("menu");
 }
 
@@ -1161,6 +1819,7 @@ function updateCartQty(cartId, delta) {
   if (!item) return;
   item.quantity += delta;
   if (item.quantity <= 0) {
+    item.quantity = 0;
     state.pendingDeleteId = cartId;
   }
   render();
@@ -1176,3 +1835,5 @@ function showToast(message) {
 }
 
 render();
+bootstrap();
+
