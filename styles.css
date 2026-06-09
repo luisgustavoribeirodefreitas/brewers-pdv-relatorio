@@ -1846,9 +1846,9 @@ button {
 .staff-table-head,
 .staff-order-row {
   display: grid;
-  grid-template-columns: 80px minmax(260px, 1fr) 68px 100px minmax(220px, 249px);
+  grid-template-columns: 92px minmax(220px, 1fr) 68px 100px 100px minmax(220px, 249px);
   align-items: center;
-  column-gap: 20px;
+  column-gap: 16px;
 }
 
 .staff-table-head {

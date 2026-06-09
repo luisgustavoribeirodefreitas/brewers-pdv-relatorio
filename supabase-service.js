@@ -282,6 +282,11 @@ function normalizeOrder(order, items = []) {
     total: Number(order.total || 0),
     notes: order.notes || "",
     payment: order.payment || "",
+    paymentMethod: order.payment || "",
+    is_paid: Boolean(order.is_paid),
+    isPaid: Boolean(order.is_paid),
+    paid_at: order.paid_at || null,
+    paidAt: order.paid_at || null,
     client: order.client || null,
     createdAt: order.created_at,
     created_at: order.created_at,
@@ -354,22 +359,26 @@ export async function createOrder(order) {
   const orderId = order.id || crypto.randomUUID();
 
   const orderData = {
-    id: orderId,
-    mesa: order.mesa ?? order.table ?? "",
-    status: order.status || "Novo",
-    hora:
-      order.hora ||
-      new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit"
-      }),
-    subtotal: Number(order.subtotal || 0),
-    service: Number(order.service || 0),
-    total: Number(order.total || 0),
-    notes: order.notes || "",
-    payment: order.payment || "",
-    client: order.client || null,
-    created_at: new Date().toISOString()
+  id: orderId,
+  mesa: order.mesa ?? order.table ?? "",
+  status: order.status || "Novo",
+  hora:
+    order.hora ||
+    new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    }),
+  subtotal: Number(order.subtotal || 0),
+  service: Number(order.service || 0),
+  total: Number(order.total || 0),
+  notes: order.notes || "",
+  payment: order.payment || "",
+  is_paid: Boolean(order.is_paid ?? order.isPaid ?? false),
+  paid_at: Boolean(order.is_paid ?? order.isPaid ?? false)
+    ? new Date().toISOString()
+    : null,
+  client: order.client || null,
+  created_at: new Date().toISOString()
   };
 
   const { data: savedOrder, error: orderError } = await supabase
@@ -433,6 +442,14 @@ export async function updateOrder(orderId, orderData) {
   if ("total" in orderData) orderFields.total = Number(orderData.total || 0);
   if ("notes" in orderData) orderFields.notes = orderData.notes || "";
   if ("payment" in orderData) orderFields.payment = orderData.payment || "";
+  if ("is_paid" in orderData || "isPaid" in orderData) {
+  const isPaid = Boolean(orderData.is_paid ?? orderData.isPaid);
+
+  orderFields.is_paid = isPaid;
+  orderFields.paid_at = isPaid
+    ? (orderData.paid_at || orderData.paidAt || new Date().toISOString())
+    : null;
+  }
   if ("client" in orderData) orderFields.client = orderData.client || null;
 
   if (Object.keys(orderFields).length) {

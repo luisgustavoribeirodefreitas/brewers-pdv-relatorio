@@ -13,6 +13,7 @@ import {
   closeCash,
   createOrder,
   updateOrderStatus,
+  updateOrder,
   updateOrderItems,
   uploadProductImage,
   listenOrders
@@ -475,10 +476,11 @@ const state = {
   ],
   cart: [],
   scroll: {
-    menuByCategory: {},
-    cart: 0,
-    staffMain: 0,
-    adminMenu: 0
+  menuByCategory: {},
+  cart: 0,
+  staffMain: 0,
+  adminMenu: 0,
+  tableFlowContent: 0
   }
 };
 
@@ -569,6 +571,8 @@ function productsByCategory(category) {
 }
 
 function orderFromApi(order) {
+  const isPaid = Boolean(order.is_paid ?? order.isPaid);
+
   return {
     id: String(order.id),
     numero: order.numero,
@@ -581,6 +585,11 @@ function orderFromApi(order) {
     service: Number(order.service || 0),
     total: Number(order.total || 0),
     payment: order.payment || "",
+    paymentMethod: order.payment || order.paymentMethod || "",
+    is_paid: isPaid,
+    isPaid,
+    paid_at: order.paid_at || null,
+    paidAt: order.paid_at || null,
     client: order.client || null,
     items: order.items || []
   };
@@ -712,9 +721,10 @@ async function bootstrap() {
 
 function setView(view) {
   if (view === "welcome") {
-    state.currentTable = randomTable();
+    state.currentTable = randomAvailableTable() || randomTable();
     state.cart = [];
   }
+
   state.view = view;
   render();
 }
@@ -729,6 +739,7 @@ function captureScrollPositions() {
   const cartList = document.querySelector(".cart-list");
   const staffMain = document.querySelector(".staff-main");
   const adminMenuList = document.querySelector(".admin-menu-list");
+  const tableFlowContent = document.querySelector(".table-flow-content");
   const menuScrollTarget = menuMain || productGrid;
 
   if (menuScrollTarget) {
@@ -743,6 +754,9 @@ function captureScrollPositions() {
   if (adminMenuList) {
     state.scroll.adminMenu = adminMenuList.scrollTop;
   }
+  if (tableFlowContent) {
+  state.scroll.tableFlowContent = tableFlowContent.scrollTop;
+}
 }
 
 function restoreScrollPositions() {
@@ -752,6 +766,7 @@ function restoreScrollPositions() {
     const cartList = document.querySelector(".cart-list");
     const staffMain = document.querySelector(".staff-main");
     const adminMenuList = document.querySelector(".admin-menu-list");
+    const tableFlowContent = document.querySelector(".table-flow-content");
     const menuScrollTarget = menuMain || productGrid;
 
     if (menuScrollTarget) {
@@ -765,6 +780,9 @@ function restoreScrollPositions() {
     }
     if (adminMenuList) {
       adminMenuList.scrollTop = state.scroll.adminMenu || 0;
+    }
+    if (tableFlowContent) {
+      tableFlowContent.scrollTop = state.scroll.tableFlowContent || 0;
     }
   });
 }
@@ -1209,7 +1227,7 @@ function renderOrdersTable(orders) {
   return `
     <section class="staff-table">
       <div class="staff-table-head">
-        <span>Mesa/Pedido</span><span>Itens do Pedido</span><span>Hora</span><span>Status</span><span>Ações</span>
+        <span>Mesa/Pedido</span><span>Itens do Pedido</span><span>Hora</span><span>Status</span><span>Pagamento</span><span>Ações</span>
       </div>
       ${orders.length ? orders.map((order) => `
         <article class="staff-order-row">
@@ -1217,6 +1235,7 @@ function renderOrdersTable(orders) {
           <span>${order.itens}</span>
           <span class="muted">${order.hora}</span>
           <span class="status-badge ${statusClass(order.status)}">${order.status}</span>
+          <span class="status-badge ${paymentStatusClass(order)}">${paymentStatusLabel(order)}</span>
           <div class="row-actions">
             ${order.status !== "Entregue" ? `<button class="staff-mini-primary" data-action="advance-order" data-order-id="${order.id}">Avançar Status</button>` : ""}
             ${order.status !== "Entregue"
@@ -1242,6 +1261,10 @@ function isOpenStaffOrder(order) {
   return order && !closedOrderStatuses.has(normalizePlainText(order.status));
 }
 
+function isOrderPaid(order) {
+  return Boolean(order?.isPaid ?? order?.is_paid);
+}
+
 function isOrderLinkedToStaffTable(order) {
   const mesa = normalizePlainText(order?.mesa);
   if (!mesa) return false;
@@ -1249,12 +1272,44 @@ function isOrderLinkedToStaffTable(order) {
   return staffTables.some((table) => normalizePlainText(table) === mesa);
 }
 
-function activeStaffTableCount() {
+function tableAccountOrders(table) {
+  const tableKey = normalizePlainText(table);
+
+  return state.staffOrders.filter((order) =>
+    normalizePlainText(order.mesa) === tableKey &&
+    isOrderLinkedToStaffTable(order) &&
+    !isOrderPaid(order)
+  );
+}
+
+function occupiedStaffTables() {
   return new Set(
     state.staffOrders
-      .filter((order) => isOpenStaffOrder(order) && isOrderLinkedToStaffTable(order))
+      .filter((order) => isOrderLinkedToStaffTable(order) && !isOrderPaid(order))
       .map((order) => normalizePlainText(order.mesa))
-  ).size;
+  );
+}
+
+function availableStaffTables(currentTable = null) {
+  const occupied = occupiedStaffTables();
+  const currentKey = normalizePlainText(currentTable);
+
+  return staffTables.filter((table) => {
+    const tableKey = normalizePlainText(table);
+    return tableKey === currentKey || !occupied.has(tableKey);
+  });
+}
+
+function randomAvailableTable() {
+  const available = availableStaffTables();
+
+  if (!available.length) return "";
+
+  return available[Math.floor(Math.random() * available.length)];
+}
+
+function activeStaffTableCount() {
+  return occupiedStaffTables().size;
 }
 
 function formatOrderNumber(numero) {
@@ -1289,17 +1344,22 @@ function orderDisplayLabel(order) {
   return `#${formatOrderNumber(order?.numero)}`;
 }
 
+function paymentStatusLabel(order) {
+  return isOrderPaid(order) ? "Pago" : "Não pago";
+}
+
+function paymentStatusClass(order) {
+  return isOrderPaid(order) ? "done" : "new";
+}
+
+
 function renderStaffTables() {
-  const tablesWithOrders = new Set(
-  state.staffOrders
-    .filter((order) => isOpenStaffOrder(order) && isOrderLinkedToStaffTable(order))
-    .map((order) => order.mesa)
-);
+  const tablesWithOrders = occupiedStaffTables();
   return `
     ${renderStaffHeader("Mesas", "", `<button class="staff-primary small" data-action="new-order">+ Novo Pedido</button>`)}
     <section class="tables-grid">
       ${staffTables.map((table) => {
-        const hasOrder = tablesWithOrders.has(table);
+        const hasOrder = tablesWithOrders.has(normalizePlainText(table));
         return `
           <button class="table-card ${hasOrder ? "" : "table-card--empty"}" data-action="staff-table-detail" data-table="${table}">
             <span>${table}</span>
@@ -1574,9 +1634,20 @@ function renderSettingsPrinterModal() {
 
 function renderSettingsTablesModal() {
   const openOrdersByTable = new Map(
-  state.staffOrders
-    .filter((order) => isOpenStaffOrder(order) && isOrderLinkedToStaffTable(order))
-    .map((order) => [order.mesa, order])
+  staffTables.map((table) => {
+    const orders = tableAccountOrders(table);
+    const total = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+
+    return [
+      table,
+      orders.length
+        ? {
+            status: `${orders.length} pedido(s) em aberto`,
+            total
+          }
+        : null
+     ];
+    })
   );
   return `
     <div class="settings-detail-toolbar">
@@ -2170,24 +2241,21 @@ document.addEventListener("click", (event) => {
     "staff-order-item-remove": () => removeStaffOrderItem(target.dataset.orderId, target.dataset.itemKey),
     "save-order-items": () => saveStaffOrderItems(),
     "staff-table-detail": () => {
-      const table = target.dataset.table;
-      const existingOrder = state.staffOrders.find(
-        (o) => o.mesa === table && isOpenStaffOrder(o)
-      );
-      state.staffTableFlow = {
-        active: true,
-        isNew: false,
-        table,
-        tab: "cliente",
-        selectedClientId: null,
-        orderId: existingOrder ? existingOrder.id : null,
-        items: existingOrder
-          ? (existingOrder.items || []).map((item) => ({ ...item }))
-          : [],
-        paymentMethod: "Pix",
-        category: "Bebidas Quentes"
-      };
-      render();
+        const table = target.dataset.table;
+
+        state.staffTableFlow = {
+          active: true,
+          isNew: false,
+          table,
+          tab: "pedido",
+          selectedClientId: null,
+          orderId: null,
+          items: [],
+          paymentMethod: "Pix",
+          category: "Bebidas Quentes"
+        };
+
+        render();
     },
     "new-order": () => {
       state.staffTableFlow = {
@@ -2284,15 +2352,7 @@ document.addEventListener("click", (event) => {
       requestDeleteConfirmation("table", tableName || "mesa", { tableName });
     },
     "show-toast": () => showToast(target.dataset.message || "Ação realizada"),
-    "confirm-payment": () => {
-      // salva a forma de pagamento no pedido
-      const select = document.querySelector(".staff-dialog select");
-      const paymentMethod = select?.value || "Dinheiro";
-      const order = selectedStaffOrder();
-      if (order) order.paymentMethod = paymentMethod;
-      state.staffModal = null;
-      showToast("Pagamento confirmado com sucesso.");
-    }
+    "confirm-payment": () => confirmSelectedOrderPayment()
   };
 
   if (actions[action]) actions[action]();
@@ -2486,6 +2546,41 @@ async function saveStaffOrderItems() {
     showToast("Pedido atualizado com sucesso.");
   } catch (error) {
     console.error("Erro ao salvar itens do pedido:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
+}
+
+async function confirmSelectedOrderPayment() {
+  const select = document.querySelector(".staff-dialog select");
+  const paymentMethod = select?.value || "Dinheiro";
+  const order = selectedStaffOrder();
+
+  if (!order) {
+    showToast("Selecione um pedido.");
+    return;
+  }
+
+  try {
+    await updateOrder(order.id, {
+      payment: paymentMethod,
+      is_paid: true
+    });
+
+    order.payment = paymentMethod;
+    order.paymentMethod = paymentMethod;
+    order.is_paid = true;
+    order.isPaid = true;
+    order.paid_at = new Date().toISOString();
+    order.paidAt = order.paid_at;
+
+    await syncOrders();
+
+    state.staffModal = null;
+
+    render();
+    showToast("Pagamento confirmado com sucesso.");
+  } catch (error) {
+    console.error("Erro ao confirmar pagamento:", error);
     showToast("Ocorreu um erro. Tente novamente.");
   }
 }
@@ -3052,13 +3147,14 @@ function renderFlowClienteTab() {
     (c, i) => String(i) === String(flow.selectedClientId)
   );
 
+  const tableOptions = availableStaffTables(flow.table);
   const tableSelector = flow.isNew
     ? `
       <div class="cliente-form-group" style="margin-bottom:24px">
         <label class="cliente-form-label">Mesa:</label>
         <select class="cliente-select" onchange="handleTableFlowTableChange(this)">
           <option value="">— Sem mesa —</option>
-          ${staffTables.map((t) => `<option value="${t}" ${flow.table === t ? "selected" : ""}>${t}</option>`).join("")}
+          ${tableOptions.map((t) => `<option value="${t}" ${flow.table === t ? "selected" : ""}>${t}</option>`).join("")}
         </select>
       </div>
     `
@@ -3183,9 +3279,33 @@ function renderFlowPedidoTab() {
 
 function renderFlowPagamentoTab() {
   const flow = state.staffTableFlow;
-  const items = flow.items || [];
-  const { subtotal, service, total } = tableFlowTotals();
   const method = flow.paymentMethod;
+
+  const draftTotals = tableFlowTotals();
+
+  const draftOrder = flow.items.length && !flow.orderId
+    ? {
+        id: "draft",
+        numero: null,
+        itens: flow.items.map((item) => `${item.nome} x ${item.quantity}`).join(", "),
+        items: flow.items,
+        subtotal: draftTotals.subtotal,
+        service: draftTotals.service,
+        total: draftTotals.total
+      }
+    : null;
+
+  const accountOrders = flow.table
+    ? tableAccountOrders(flow.table)
+    : [];
+
+  const paymentOrders = flow.table
+    ? [...accountOrders, draftOrder].filter(Boolean)
+    : [draftOrder].filter(Boolean);
+
+  const subtotal = paymentOrders.reduce((sum, order) => sum + Number(order.subtotal || 0), 0);
+  const service = paymentOrders.reduce((sum, order) => sum + Number(order.service || 0), 0);
+  const total = paymentOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
 
   const pixBox = method === "Pix" ? `
     <div class="pagamento-pix-box">
@@ -3202,17 +3322,38 @@ function renderFlowPagamentoTab() {
   return `
     <div class="pagamento-tab-layout">
       <div class="pagamento-items-area">
-        <h3 class="pagamento-items-title">Lista de itens consumidos</h3>
-        ${items.map((item) => {
-          const unitPrice = Number(item.unit_price || item.preco || 0);
-          return `
-            <div class="pagamento-item-row">
-              <span class="pagamento-item-qty">${item.quantity}x</span>
-              <span>${item.nome}</span>
-              <span class="pagamento-item-price">${money(unitPrice * item.quantity)}</span>
-            </div>
-          `;
-        }).join("") || `<p style="color:var(--color-muted);font-size:14px">Nenhum item lançado.</p>`}
+        <h3 class="pagamento-items-title">
+          ${flow.table ? `Conta da ${escapeHtml(flow.table)}` : "Pagamento do pedido"}
+        </h3>
+
+        ${paymentOrders.length
+          ? paymentOrders.map((order) => `
+              <section class="pagamento-order-group" style="margin-bottom:18px">
+                <h4 style="margin:0 0 10px;color:var(--color-header)">
+                  ${order.id === "draft"
+                    ? "Novo pedido ainda não lançado"
+                    : `Pedido #${formatOrderNumber(order.numero)}`}
+                </h4>
+
+                ${(order.items || []).map((item) => {
+                  const unitPrice = Number(item.unit_price || item.preco || 0);
+                  return `
+                    <div class="pagamento-item-row">
+                      <span class="pagamento-item-qty">${item.quantity}x</span>
+                      <span>${escapeHtml(item.nome)}</span>
+                      <span class="pagamento-item-price">${money(unitPrice * Number(item.quantity || 1))}</span>
+                    </div>
+                  `;
+                }).join("")}
+
+                <div class="pagamento-summary-row total" style="margin-top:8px">
+                  <span>Total do pedido</span>
+                  <strong>${money(Number(order.total || 0))}</strong>
+                </div>
+              </section>
+            `).join("")
+          : `<p style="color:var(--color-muted);font-size:14px">Nenhum pedido em aberto para pagamento.</p>`
+        }
       </div>
 
       <div class="pagamento-summary-area">
@@ -3239,7 +3380,7 @@ function renderFlowPagamentoTab() {
         ${pixBox}
         <div class="pagamento-actions">
           <button class="pagamento-confirm-btn" data-action="table-flow-confirm-payment"
-                  ${items.length ? "" : "disabled"}>
+                  ${paymentOrders.length ? "" : "disabled"}>
             ✓ Confirmar Pagamento
           </button>
           <button class="pagamento-print-btn" data-action="table-flow-print">
@@ -3296,11 +3437,19 @@ async function tableFlowLancar() {
     return;
   }
 
+  if (!flow.table) {
+    state.staffTableFlow.tab = "pagamento";
+    showToast("Pedido sem mesa deve ser pago no ato.");
+    render();
+    return;
+  }
+
   const selectedClient = state.staffClients.find(
-    (_, index) => String(index) === String(flow.selectedClientId)
+    (client, index) =>
+      String(client.id) === String(flow.selectedClientId) ||
+      String(index) === String(flow.selectedClientId)
   );
 
-  const mesa = flow.table || "";
   const { subtotal, service, total } = tableFlowTotals();
 
   const items = flow.items.map((item) => ({
@@ -3315,38 +3464,31 @@ async function tableFlowLancar() {
   }));
 
   try {
-    if (flow.orderId) {
-      await updateOrderItems(
-        flow.orderId,
-        items,
-        subtotal,
-        service,
-        total
-      );
-    } else {
-      const savedOrder = await createOrder({
-        mesa,
-        status: "Novo",
-        hora: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit"
-        }),
-        subtotal,
-        service,
-        total,
-        notes: "",
-        payment: "",
-        client: selectedClient?.id || selectedClient?.nome || null,
-        items
-      });
+    const savedOrder = await createOrder({
+      mesa: flow.table,
+      status: "Novo",
+      hora: new Date().toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }),
+      subtotal,
+      service,
+      total,
+      notes: "",
+      payment: "",
+      is_paid: false,
+      client: selectedClient?.id || selectedClient?.nome || null,
+      items
+    });
 
-      state.staffTableFlow.orderId = savedOrder.id;
-    }
+    state.staffTableFlow.orderId = savedOrder.id;
 
     await syncOrders();
 
     showToast("Pedido lançado com sucesso.");
-    state.staffTableFlow.tab = "pagamento";
+    state.staffTableFlow.items = [];
+    state.staffTableFlow.orderId = null;
+    state.staffTableFlow.tab = "pedido";
     render();
   } catch (error) {
     console.error("Erro ao lançar pedido:", error);
@@ -3356,38 +3498,129 @@ async function tableFlowLancar() {
 
 async function tableFlowConfirmPayment() {
   const flow = state.staffTableFlow;
-  const { total } = tableFlowTotals();
-  const orderId = flow.orderId;
+  const method = flow.paymentMethod || "Pix";
 
-  if (orderId && /^\d+$/.test(String(orderId))) {
-    await apiRequest(`/api/orders/${orderId}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: "Entregue" })
-    });
-    await syncOrders();
-  } else if (orderId) {
-    const localOrder = state.staffOrders.find((o) => o.id === orderId);
-    if (localOrder) {
-      localOrder.status = "Entregue";
-      localOrder.paymentMethod = flow.paymentMethod;
-      localOrder.total = total;
+  const selectedClient = state.staffClients.find(
+    (client, index) =>
+      String(client.id) === String(flow.selectedClientId) ||
+      String(index) === String(flow.selectedClientId)
+  );
+
+  try {
+    const ordersToPay = [];
+
+    if (!flow.table) {
+      if (!flow.items.length) {
+        showToast("Adicione ao menos um item para confirmar o pagamento.");
+        state.staffTableFlow.tab = "pedido";
+        render();
+        return;
+      }
+
+      const { subtotal, service, total } = tableFlowTotals();
+
+      const items = flow.items.map((item) => ({
+        product_id: item.product_id || item.productId || "",
+        productId: item.product_id || item.productId || "",
+        nome: item.nome,
+        option: item.option || "",
+        quantity: Number(item.quantity || 1),
+        unit_price: Number(item.unit_price || item.preco || 0),
+        preco: Number(item.unit_price || item.preco || 0),
+        notes: item.notes || ""
+      }));
+
+      await createOrder({
+        mesa: "",
+        status: "Novo",
+        hora: new Date().toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit"
+        }),
+        subtotal,
+        service,
+        total,
+        notes: "",
+        payment: method,
+        is_paid: true,
+        client: selectedClient?.id || selectedClient?.nome || null,
+        items
+      });
+    } else {
+      if (flow.items.length) {
+        const { subtotal, service, total } = tableFlowTotals();
+
+        const items = flow.items.map((item) => ({
+          product_id: item.product_id || item.productId || "",
+          productId: item.product_id || item.productId || "",
+          nome: item.nome,
+          option: item.option || "",
+          quantity: Number(item.quantity || 1),
+          unit_price: Number(item.unit_price || item.preco || 0),
+          preco: Number(item.unit_price || item.preco || 0),
+          notes: item.notes || ""
+        }));
+
+        const savedOrder = await createOrder({
+          mesa: flow.table,
+          status: "Novo",
+          hora: new Date().toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit"
+          }),
+          subtotal,
+          service,
+          total,
+          notes: "",
+          payment: "",
+          is_paid: false,
+          client: selectedClient?.id || selectedClient?.nome || null,
+          items
+        });
+
+        ordersToPay.push(savedOrder);
+      }
+
+      ordersToPay.push(...tableAccountOrders(flow.table));
+
+      if (!ordersToPay.length) {
+        showToast("Não há conta aberta para esta mesa.");
+        return;
+      }
+
+      await Promise.all(
+        ordersToPay.map((order) =>
+          updateOrder(order.id, {
+            payment: method,
+            is_paid: true
+          })
+        )
+      );
     }
-  }
 
-  showToast(`Pagamento via ${flow.paymentMethod} confirmado! ${money(total)}`);
-  state.staffTableFlow = {
-    active: false,
-    isNew: false,
-    table: null,
-    tab: "cliente",
-    selectedClientId: null,
-    orderId: null,
-    items: [],
-    paymentMethod: "Pix",
-    category: "Bebidas Quentes"
-  };
-  state.staffView = "orders";
-  render();
+    await syncOrders();
+
+    showToast("Pagamento confirmado com sucesso.");
+
+    state.staffTableFlow = {
+      active: false,
+      isNew: false,
+      table: null,
+      tab: "cliente",
+      selectedClientId: null,
+      orderId: null,
+      items: [],
+      paymentMethod: "Pix",
+      category: "Bebidas Quentes"
+    };
+
+    state.staffView = "overview";
+
+    render();
+  } catch (error) {
+    console.error("Erro ao confirmar pagamento:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 window.setInterval(() => {
