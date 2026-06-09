@@ -65,6 +65,7 @@ const staffNav = [
   { id: "settings", label: "Configurações", icon: "settings", asset: "assets/icon-nav-settings.svg" }
 ];
 const orderStatusFlow = ["Novo", "Em preparo", "Pronto", "Entregue"];
+const closedOrderStatuses = new Set(["entregue", "pago", "fechado", "finalizado", "cancelado", "concluido"]);
 const staffPaymentMethods = [
   { id: "Dinheiro", label: "Dinheiro", icon: "cash", asset: "assets/icon-payment-cash.svg" },
   { id: "Crédito", label: "Cartão", icon: "card", asset: "assets/icon-payment-card.svg" },
@@ -476,7 +477,8 @@ const state = {
   scroll: {
     menuByCategory: {},
     cart: 0,
-    staffMain: 0
+    staffMain: 0,
+    adminMenu: 0
   }
 };
 
@@ -717,12 +719,15 @@ function currentCategoryFromDom() {
 }
 
 function captureScrollPositions() {
+  const menuMain = document.querySelector(".menu-main");
   const productGrid = document.querySelector(".product-grid");
   const cartList = document.querySelector(".cart-list");
   const staffMain = document.querySelector(".staff-main");
+  const adminMenuList = document.querySelector(".admin-menu-list");
+  const menuScrollTarget = menuMain || productGrid;
 
-  if (productGrid) {
-    state.scroll.menuByCategory[currentCategoryFromDom()] = productGrid.scrollTop;
+  if (menuScrollTarget) {
+    state.scroll.menuByCategory[currentCategoryFromDom()] = menuScrollTarget.scrollTop;
   }
   if (cartList) {
     state.scroll.cart = cartList.scrollTop;
@@ -730,22 +735,31 @@ function captureScrollPositions() {
   if (staffMain) {
     state.scroll.staffMain = staffMain.scrollTop;
   }
+  if (adminMenuList) {
+    state.scroll.adminMenu = adminMenuList.scrollTop;
+  }
 }
 
 function restoreScrollPositions() {
   window.requestAnimationFrame(() => {
+    const menuMain = document.querySelector(".menu-main");
     const productGrid = document.querySelector(".product-grid");
     const cartList = document.querySelector(".cart-list");
     const staffMain = document.querySelector(".staff-main");
+    const adminMenuList = document.querySelector(".admin-menu-list");
+    const menuScrollTarget = menuMain || productGrid;
 
-    if (productGrid) {
-      productGrid.scrollTop = state.scroll.menuByCategory[state.category] || 0;
+    if (menuScrollTarget) {
+      menuScrollTarget.scrollTop = state.scroll.menuByCategory[state.category] || 0;
     }
     if (cartList) {
       cartList.scrollTop = state.scroll.cart || 0;
     }
     if (staffMain) {
       staffMain.scrollTop = state.scroll.staffMain || 0;
+    }
+    if (adminMenuList) {
+      adminMenuList.scrollTop = state.scroll.adminMenu || 0;
     }
   });
 }
@@ -1132,7 +1146,7 @@ function currentStaffDateTimeLabel(date = new Date()) {
   const weekday = date.toLocaleDateString("pt-BR", { weekday: "long" });
   const dayMonth = date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${dayMonth} · ${time}`;
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${dayMonth} &middot; ${time}`;
 }
 function renderStaffHeader(title, subtitle = "Segunda-feira, 13 de Abril · 14:32", action = "") {
   return `
@@ -1150,7 +1164,11 @@ function renderStaffOverview() {
   const prep = state.staffOrders.filter((order) => order.status === "Em preparo").length;
   const delivered = state.staffOrders.filter((order) => order.status === "Entregue").length;
   const todayOrders = state.staffOrders.length;
-  const activeTables = new Set(state.staffOrders.map((o) => o.mesa)).size;
+  const activeTables = new Set(
+    state.staffOrders
+      .filter(isOpenStaffOrder)
+      .map((order) => order.mesa)
+  ).size;
   const totalTables = staffTables.length;
   const cashLabel = state.cashOpen ? "Caixa aberto" : "Abrir Caixa";
   const cashAction = state.cashOpen ? "cash-menu" : "open-cash-modal";
@@ -1219,10 +1237,14 @@ function statusClass(status) {
   }[status] || "new";
 }
 
+function isOpenStaffOrder(order) {
+  return order && !closedOrderStatuses.has(normalizePlainText(order.status));
+}
+
 function renderStaffTables() {
   const tablesWithOrders = new Set(
     state.staffOrders
-      .filter((o) => o.status !== "Entregue")
+      .filter(isOpenStaffOrder)
       .map((o) => o.mesa)
   );
   return `
@@ -1261,18 +1283,68 @@ function renderStaffClients() {
   `;
 }
 function formatReportDate(value) {
-  const date = value ? new Date(value) : new Date();
+  const date = parseDateLike(value) || new Date();
   if (Number.isNaN(date.getTime())) return new Date().toLocaleDateString("pt-BR");
   return date.toLocaleDateString("pt-BR");
+}
+
+function parsePtBrDate(value) {
+  const digits = digitsOnly(value).slice(0, 8);
+  if (digits.length !== 8) return null;
+  const day = Number(digits.slice(0, 2));
+  const month = Number(digits.slice(2, 4)) - 1;
+  const year = Number(digits.slice(4, 8));
+  const date = new Date(year, month, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) return null;
+  return date;
+}
+
+function parseDateLike(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value?.toDate === "function") return value.toDate();
+  if (typeof value === "object") {
+    const seconds = value.seconds ?? value._seconds;
+    if (typeof seconds === "number") return new Date(seconds * 1000);
+  }
+  if (typeof value === "number") return new Date(value);
+  if (typeof value === "string") {
+    const ptDate = parsePtBrDate(value);
+    if (ptDate) return ptDate;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function reportOrderDate(order) {
+  return parseDateLike(order.createdAt || order.created_at || order.data || order.date);
+}
+
+function reportFilteredOrders() {
+  const start = parsePtBrDate(state.staffReportStartDate);
+  const end = parsePtBrDate(state.staffReportEndDate);
+  if (!start && !end) return state.staffOrders;
+
+  const startTime = start ? new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime() : -Infinity;
+  const endTime = end ? new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999).getTime() : Infinity;
+
+  return state.staffOrders.filter((order) => {
+    const date = reportOrderDate(order);
+    if (!date) return false;
+    const time = date.getTime();
+    return time >= startTime && time <= endTime;
+  });
 }
 
 function staffReportStats() {
   const rows = new Map();
   let totalItems = 0;
   let totalRevenue = 0;
+  const filteredOrders = reportFilteredOrders();
 
-  state.staffOrders.forEach((order) => {
-    const date = formatReportDate(order.createdAt);
+  filteredOrders.forEach((order) => {
+    const date = formatReportDate(order.createdAt || order.created_at || order.data || order.date);
     const itemCount = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     const orderTotal = Number(order.total || 0);
     totalItems += itemCount;
@@ -1288,14 +1360,14 @@ function staffReportStats() {
     rows: [...rows.values()],
     totalItems,
     totalRevenue,
-    totalOrders: state.staffOrders.length,
-    averageTicket: state.staffOrders.length ? totalRevenue / state.staffOrders.length : 0
+    totalOrders: filteredOrders.length,
+    averageTicket: filteredOrders.length ? totalRevenue / filteredOrders.length : 0
   };
 }
 
 function staffProductReportStats() {
   const rows = new Map();
-  state.staffOrders.forEach((order) => {
+  reportFilteredOrders().forEach((order) => {
     (order.items || []).forEach((item) => {
       const productId = item.product_id || item.productId || item.nome;
       const product = productById(productId);
@@ -1396,8 +1468,8 @@ function renderStaffMenu() {
 }
 function renderStaffSettings() {
   const stats = staffReportStats();
-  const activeTables = new Set(state.staffOrders.filter((order) => order.status !== "Entregue").map((order) => order.mesa)).size;
-  const nowLabel = new Date().toLocaleString("pt-BR", { weekday: "long", day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit" });
+  const activeTables = new Set(state.staffOrders.filter(isOpenStaffOrder).map((order) => order.mesa)).size;
+  const nowLabel = currentStaffDateTimeLabel();
   return `
     ${renderStaffHeader("Configura&ccedil;&otilde;es", "")}
     <section class="settings-screen">
@@ -1455,7 +1527,7 @@ function renderSettingsPrinterModal() {
 function renderSettingsTablesModal() {
   const openOrdersByTable = new Map(
     state.staffOrders
-      .filter((order) => order.status !== "Entregue")
+      .filter(isOpenStaffOrder)
       .map((order) => [order.mesa, order])
   );
   return `
@@ -1495,11 +1567,6 @@ function renderSettingsPaymentsModal() {
 }
 
 function renderModal() {
-  if (state.staffModal && state.staffModal !== "cash-menu") {
-    modalRoot.innerHTML = renderStaffModal();
-    return;
-  }
-
   const deleteRequest = state.pendingDelete || (state.pendingDeleteId ? { type: "cart", label: "item" } : null);
   if (deleteRequest) {
     const deleteLabel = deleteRequest.label || "item";
@@ -1517,6 +1584,12 @@ function renderModal() {
     `;
     return;
   }
+
+  if (state.staffModal && state.staffModal !== "cash-menu") {
+    modalRoot.innerHTML = renderStaffModal();
+    return;
+  }
+
   if (state.view === "checkout") {
     const values = totals();
     modalRoot.innerHTML = `
@@ -2051,7 +2124,7 @@ document.addEventListener("click", (event) => {
     "staff-table-detail": () => {
       const table = target.dataset.table;
       const existingOrder = state.staffOrders.find(
-        (o) => o.mesa === table && o.status !== "Entregue"
+        (o) => o.mesa === table && isOpenStaffOrder(o)
       );
       state.staffTableFlow = {
         active: true,
@@ -2639,7 +2712,7 @@ function updateReportDatesFromInputs() {
 }
 
 async function deleteTableFromSettings(tableName) {
-  const hasOpenOrder = state.staffOrders.some((order) => order.mesa === tableName && order.status !== "Entregue");
+  const hasOpenOrder = state.staffOrders.some((order) => order.mesa === tableName && isOpenStaffOrder(order));
 
   if (hasOpenOrder) {
     showToast("Não é possível excluir uma mesa ocupada.");
