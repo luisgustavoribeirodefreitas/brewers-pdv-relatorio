@@ -682,6 +682,19 @@ async function syncProducts() {
 function syncOrders() {
   return listenOrders((firebaseOrders) => {
     state.staffOrders = firebaseOrders.map(orderFromApi);
+
+    const currentTableIsOccupied = occupiedStaffTables().has(
+      normalizePlainText(state.currentTable)
+    );
+
+    const canChangeClientTable =
+      state.view === "welcome" ||
+      (state.view === "menu" && state.cart.length === 0);
+
+    if (currentTableIsOccupied && canChangeClientTable) {
+      state.currentTable = randomAvailableTable() || randomTable();
+    }
+
     render();
   });
 }
