@@ -1225,7 +1225,6 @@ function renderStaffOverview() {
 
   return `
     ${renderStaffHeader("Pedidos em Aberto", currentStaffDateTimeLabel(), cashSlot)}
-    ${apiOnline ? "" : `<p class="offline-banner">Modo local: inicie o servidor para salvar no banco.</p>`}
     ${state.cashOpen ? `
       <section class="staff-stats">
         <article><strong>${todayOrders}</strong><span>Pedidos Hoje</span></article>
@@ -1618,7 +1617,7 @@ function renderStaffSettings() {
         </section>
 
         <section class="settings-info-grid">
-          <article class="settings-info-card"><h4>Status de Conex&atilde;o e Servi&ccedil;os</h4><p>Rede Wifi: ${apiOnline ? "Conectado" : "Modo local"}<br>Sincroniza&ccedil;&atilde;o Nuvem: ${apiOnline ? "Ativa" : "Aguardando servidor"}<br>Licen&ccedil;a do Software: Ativa</p></article>
+          <article class="settings-info-card"><h4>Status de Conex&atilde;o e Servi&ccedil;os</h4><p>Rede Wifi: Conectado<br>Sincroniza&ccedil;&atilde;o Nuvem: Supabase ativo<br>Licen&ccedil;a do Software: Ativa</p></article>
           <article class="settings-info-card"><h4>Resumo da Opera&ccedil;&atilde;o</h4><p>Usu&aacute;rios ativos: ${state.staffUser ? 1 : 0}<br>M&eacute;dia de tempo por atendimento: 16min<br>Mesas ocupadas: ${activeTables}/${staffTables.length}</p></article>
           <article class="settings-info-card"><h4>Informa&ccedil;&otilde;es de Cadastro</h4><p>Produtos cadastrados: ${products.length}<br>Clientes cadastrados: ${state.staffClients.length}<br>M&eacute;todos de pagamento: 3</p></article>
           <article class="settings-info-card"><h4>Informa&ccedil;&otilde;es do Dispositivo</h4><p>Nome do terminal: BREW-05<br>Pedidos registrados: ${stats.totalOrders}<br>&Uacute;ltima vers&atilde;o dispon&iacute;vel: 5.27.1</p></article>
