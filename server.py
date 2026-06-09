@@ -64,7 +64,8 @@ def init_db():
                 tamanho TEXT NOT NULL DEFAULT '',
                 opcoes TEXT NOT NULL DEFAULT '[]',
                 imagem TEXT NOT NULL DEFAULT '',
-                frame TEXT NOT NULL DEFAULT ''
+                frame TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS orders (
@@ -119,11 +120,15 @@ def init_db():
             """
         )
 
+        product_columns = {row["name"] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+        if "active" not in product_columns:
+            conn.execute("ALTER TABLE products ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+
         if conn.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
             conn.executemany(
                 """
-                INSERT INTO products (id, nome, categoria, descricao, preco, tamanho, opcoes, imagem, frame)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO products (id, nome, categoria, descricao, preco, tamanho, opcoes, imagem, frame, active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 [(p[0], p[1], p[2], p[3], p[4], p[5], json.dumps(p[6], ensure_ascii=False), p[7], p[8]) for p in SEED_PRODUCTS],
             )
@@ -158,6 +163,7 @@ def product_from_row(row):
         "opcoes": json.loads(row["opcoes"] or "[]"),
         "imagem": row["imagem"],
         "frame": row["frame"],
+        "active": bool(row["active"]) if "active" in row.keys() else True,
     }
 
 
@@ -169,6 +175,7 @@ def order_from_row(conn, row):
         "mesa": row["mesa"],
         "status": row["status"],
         "hora": row["hora"],
+        "created_at": row["created_at"],
         "subtotal": row["subtotal"],
         "service": row["service"],
         "total": row["total"],
@@ -262,7 +269,7 @@ class BrewersHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         super().end_headers()
 
@@ -288,6 +295,13 @@ class BrewersHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
             self.handle_api_write("PATCH", parsed.path)
+            return
+        self.send_error(404)
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/"):
+            self.handle_api_write("DELETE", parsed.path)
             return
         self.send_error(404)
 
@@ -363,12 +377,22 @@ class BrewersHandler(SimpleHTTPRequestHandler):
                 self.send_json({"is_open": False})
             elif method == "POST" and path == "/api/products":
                 self.create_product(conn, body)
+            elif method == "PATCH" and path.startswith("/api/products/"):
+                product_id = path.split("/", 3)[3]
+                self.update_product(conn, product_id, body)
+            elif method == "DELETE" and path.startswith("/api/products/"):
+                product_id = path.split("/", 3)[3]
+                self.delete_product(conn, product_id)
             elif method == "POST" and path == "/api/clients":
                 cur = conn.execute(
                     "INSERT INTO clients (nome, cpf, celular, nascimento, endereco) VALUES (?, ?, ?, ?, ?)",
                     (body.get("nome", ""), body.get("cpf", ""), body.get("celular", ""), body.get("nascimento", ""), body.get("endereco", "")),
                 )
-                self.send_json({"id": cur.lastrowid}, 201)
+                row = conn.execute("SELECT * FROM clients WHERE id = ?", (cur.lastrowid,)).fetchone()
+                self.send_json({"client": dict(row)}, 201)
+            elif method == "DELETE" and path.startswith("/api/clients/"):
+                client_id = int(path.split("/", 3)[3])
+                self.delete_client(conn, client_id)
             elif method == "POST" and path == "/api/staff/register":
                 self.create_staff_user(conn, body)
             elif method == "POST" and path == "/api/staff/login":
@@ -538,8 +562,8 @@ class BrewersHandler(SimpleHTTPRequestHandler):
         product_id = body.get("id") or body.get("nome", "produto").lower().replace(" ", "-")
         conn.execute(
             """
-            INSERT OR REPLACE INTO products (id, nome, categoria, descricao, preco, tamanho, opcoes, imagem, frame)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO products (id, nome, categoria, descricao, preco, tamanho, opcoes, imagem, frame, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 product_id,
@@ -551,9 +575,59 @@ class BrewersHandler(SimpleHTTPRequestHandler):
                 json.dumps(body.get("opcoes", []), ensure_ascii=False),
                 body.get("imagem", "assets/placeholder.png"),
                 body.get("frame", ""),
+                1 if body.get("active", True) else 0,
             ),
         )
-        self.send_json({"id": product_id}, 201)
+        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        self.send_json({"product": product_from_row(row)}, 201)
+
+    def update_product(self, conn, product_id, body):
+        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        if not row:
+            self.send_json({"error": "Produto não encontrado"}, 404)
+            return
+
+        current = product_from_row(row)
+        next_product = {
+            "nome": body.get("nome", current["nome"]),
+            "categoria": body.get("categoria", current["categoria"]),
+            "descricao": body.get("descricao", current["descricao"]),
+            "preco": float(body.get("preco", current["preco"]) or 0),
+            "tamanho": body.get("tamanho", current["tamanho"]),
+            "opcoes": body.get("opcoes", current["opcoes"]),
+            "imagem": body.get("imagem", current["imagem"]),
+            "frame": body.get("frame", current["frame"]),
+            "active": 1 if body.get("active", current["active"]) else 0,
+        }
+        conn.execute(
+            """
+            UPDATE products
+            SET nome = ?, categoria = ?, descricao = ?, preco = ?, tamanho = ?, opcoes = ?, imagem = ?, frame = ?, active = ?
+            WHERE id = ?
+            """,
+            (
+                next_product["nome"],
+                next_product["categoria"],
+                next_product["descricao"],
+                next_product["preco"],
+                next_product["tamanho"],
+                json.dumps(next_product["opcoes"], ensure_ascii=False),
+                next_product["imagem"],
+                next_product["frame"],
+                next_product["active"],
+                product_id,
+            ),
+        )
+        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        self.send_json({"product": product_from_row(row)})
+
+    def delete_product(self, conn, product_id):
+        conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+        self.send_json({"ok": True})
+
+    def delete_client(self, conn, client_id):
+        conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+        self.send_json({"ok": True})
 
 
 def main():

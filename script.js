@@ -1,5 +1,32 @@
 const categories = ["Bebidas Quentes", "Bebidas Geladas", "Salgados", "Doces"];
-const staffTables = Array.from({ length: 12 }, (_, i) => `Mesa ${i + 1}`);
+function loadStaffTables() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("brewersStaffTables") || "[]");
+    if (Array.isArray(saved) && saved.length) return saved.map(String);
+  } catch {
+    // Mantem a lista padrao quando o navegador nao permite localStorage.
+  }
+  return Array.from({ length: 12 }, (_, i) => `Mesa ${i + 1}`);
+}
+
+const staffTables = loadStaffTables();
+
+function saveStaffTables() {
+  try {
+    localStorage.setItem("brewersStaffTables", JSON.stringify(staffTables));
+  } catch {
+    // Persistencia local e opcional no prototipo.
+  }
+}
+
+function nextStaffTableName() {
+  const nextNumber = staffTables.reduce((max, table) => {
+    const match = String(table).match(/\d+/);
+    return match ? Math.max(max, Number(match[0])) : max;
+  }, 0) + 1;
+  return `Mesa ${nextNumber}`;
+}
+
 function randomTable() {
   return staffTables[Math.floor(Math.random() * staffTables.length)];
 }
@@ -18,6 +45,16 @@ const staffNav = [
   { id: "settings", label: "Configurações", icon: "settings", asset: "assets/icon-nav-settings.svg" }
 ];
 const orderStatusFlow = ["Novo", "Em preparo", "Pronto", "Entregue"];
+const staffPaymentMethods = [
+  { id: "Dinheiro", label: "Dinheiro", icon: "cash", asset: "assets/icon-payment-cash.svg" },
+  { id: "Crédito", label: "Cartão", icon: "card", asset: "assets/icon-payment-card.svg" },
+  { id: "Pix", label: "Pix", icon: "pix", asset: "assets/icon-payment-pix.svg" }
+];
+const staffPrinters = [
+  { id: "counter", label: "Balcão", device: "Impressora térmica", status: "Online" },
+  { id: "kitchen", label: "Cozinha", device: "Impressora de produção", status: "Online" },
+  { id: "cashier", label: "Caixa", device: "PDF/recibo", status: "Online" }
+];
 const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
 let apiOnline = false;
 const STAFF_MASTER_CODES = {
@@ -318,6 +355,33 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function digitsOnly(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function formatCpfDisplay(value) {
+  const digits = digitsOnly(value).slice(0, 11);
+  if (digits.length >= 5) {
+    return `${digits.slice(0, 3)}.xxx.xxx-${digits.slice(-2).padStart(2, "0")}`;
+  }
+  return digits;
+}
+
+function formatPhoneInput(value) {
+  const digits = digitsOnly(value).slice(0, 11);
+  if (digits.length <= 2) return digits ? `(${digits}` : "";
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 3)} ${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
+function formatBirthDateInput(value) {
+  const digits = digitsOnly(value).slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
 function staffDisplayName(user) {
   const { first: firstName, last: lastName } = staffCompactNameFromParts(user?.firstName, user?.lastName);
   return `${firstName} ${lastName}`.trim() || user?.username || "Atendente Brewers";
@@ -348,11 +412,15 @@ const state = {
   editReturnView: null,
   selectedReason: "Tirar dúvidas",
   pendingDeleteId: null,
+  pendingDelete: null,
   lastOrderNumber: 42,
   selectedStaffOrderId: null,
   staffOrderSnapshot: null,
   staffView: "overview",
   staffModal: null,
+  staffReportType: "total",
+  staffReportStartDate: "",
+  staffReportEndDate: "",
   staffTableFlow: {
     active: false,
     isNew: false,
@@ -414,7 +482,8 @@ function money(value) {
 }
 
 function optionPrice(option) {
-  return /\+\s*R\$2/i.test(option) ? 2 : 0;
+  const match = String(option || "").match(/\+\s*R\$\s*([\d,.]+)/i);
+  return match ? parseMoneyInput(match[1]) : 0;
 }
 
 function imageStyle(productOrPath) {
@@ -424,11 +493,17 @@ function imageStyle(productOrPath) {
 
 function cardImageStyle(product) {
   const imageY = product.categoria?.includes("Bebidas") ? "0%" : "48%";
-  return `background-image: url("assets/thumbs/${product.id}.png"); --card-image-y: ${imageY}`;
+  const image = product.imagem || "assets/logo-brewers.svg";
+  const background = image.startsWith("data:")
+    ? `url("${image}")`
+    : `url("assets/thumbs/${product.id}.png"), url("${image}")`;
+  return `background-image: ${background}; --card-image-y: ${imageY}`;
 }
 
 function thumbImageStyle(productOrItem) {
   const id = productOrItem?.id || productOrItem?.productId;
+  const image = productOrItem?.imagem;
+  if (image?.startsWith("data:")) return `background-image: url("${image}")`;
   return id ? `background-image: url("assets/thumbs/${id}.png")` : "";
 }
 
@@ -460,7 +535,7 @@ function productById(id) {
 function productsByCategory(category) {
   const order = productDisplayOrder[category] || [];
   return products
-    .filter((product) => product.categoria === category)
+    .filter((product) => product.categoria === category && product.active !== false)
     .sort((a, b) => {
       const aIndex = order.indexOf(a.id);
       const bIndex = order.indexOf(b.id);
@@ -477,6 +552,7 @@ function orderFromApi(order) {
     mesa: order.mesa,
     itens: order.items_summary || (order.items || []).map((item) => `${item.nome} x ${item.quantity}`).join(", "),
     hora: order.hora,
+    createdAt: order.created_at,
     status: order.status,
     total: order.total,
     items: order.items || []
@@ -561,7 +637,7 @@ async function staffAuthRequest(path, payload) {
 
 async function syncProducts() {
   const data = await apiRequest("/api/products");
-  if (data?.products?.length) products = data.products;
+  if (Array.isArray(data?.products)) products = data.products;
 }
 
 async function syncOrders() {
@@ -1009,6 +1085,12 @@ function renderStaffContent() {
   return content[state.staffView]();
 }
 
+function currentStaffDateTimeLabel(date = new Date()) {
+  const weekday = date.toLocaleDateString("pt-BR", { weekday: "long" });
+  const dayMonth = date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
+  const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${dayMonth} · ${time}`;
+}
 function renderStaffHeader(title, subtitle = "Segunda-feira, 13 de Abril · 14:32", action = "") {
   return `
     <header class="staff-topbar">
@@ -1047,7 +1129,7 @@ function renderStaffOverview() {
   `;
 
   return `
-    ${renderStaffHeader("Pedidos em Aberto", "Segunda-feira, 13 de Abril · 14:32", cashSlot)}
+    ${renderStaffHeader("Pedidos em Aberto", currentStaffDateTimeLabel(), cashSlot)}
     ${apiOnline ? "" : `<p class="offline-banner">Modo local: inicie o servidor para salvar no banco.</p>`}
     ${state.cashOpen ? `
       <section class="staff-stats">
@@ -1075,7 +1157,9 @@ function renderOrdersTable(orders) {
           <span class="status-badge ${statusClass(order.status)}">${order.status}</span>
           <div class="row-actions">
             ${order.status !== "Entregue" ? `<button class="staff-mini-primary" data-action="advance-order" data-order-id="${order.id}">Avançar Status</button>` : ""}
-            <button class="staff-mini-light" data-action="staff-order-detail" data-order-id="${order.id}">Editar</button>
+            ${order.status !== "Entregue"
+              ? `<button class="staff-mini-light" data-action="staff-order-detail" data-order-id="${order.id}">Editar</button>`
+              : `<button class="staff-mini-light is-disabled" disabled>Entregue</button>`}
           </div>
         </article>
       `).join("") : `<p class="staff-empty-orders">Nenhum pedido aberto no momento.</p>`}
@@ -1114,80 +1198,256 @@ function renderStaffTables() {
 }
 
 function renderStaffClients() {
-  let clients = [
-    ["Luis Gustavo Freitas", "123.xxx.xxx-52", "(43) 9 1644-4645", "13/03/2007", "R. Marialvence, 140, Maringá, Paraná"],
-    ["Maria Lucia Gonzaga", "158.xxx.xxx-90", "(44) 9 5516-6358", "25/12/1996", "R. Mario e Luigi, 6, Maringá, Paraná"]
-  ];
-  clients = state.staffClients.map((client) => [client.nome, client.cpf, client.celular, client.nascimento, client.endereco]);
   return `
     ${renderStaffHeader("Clientes", "", `<button class="staff-primary small" data-action="staff-modal" data-modal="client">Cadastrar Novo</button>`)}
     <section class="staff-table client-table">
       <div class="staff-table-head client-head">
-        <span>Nome</span><span>CPF</span><span>Celular</span><span>Data de Nascimento</span><span>Endereço</span>
+        <span>Nome</span><span>CPF</span><span>Celular</span><span>Data de Nascimento</span><span>Endere&ccedil;o</span><span>A&ccedil;&otilde;es</span>
       </div>
-      ${clients.map((client) => `
+      ${state.staffClients.length ? state.staffClients.map((client, index) => `
         <article class="staff-order-row client-row">
-          ${client.map((item, index) => index === 0 ? `<strong>${item}</strong>` : `<span>${item}</span>`).join("")}
+          <strong>${escapeHtml(client.nome)}</strong>
+          <span>${escapeHtml(formatCpfDisplay(client.cpf))}</span>
+          <span>${escapeHtml(formatPhoneInput(client.celular))}</span>
+          <span>${escapeHtml(formatBirthDateInput(client.nascimento))}</span>
+          <span>${escapeHtml(client.endereco)}</span>
+          <button class="staff-icon-danger" data-action="delete-client" data-client-id="${client.id ?? ""}" data-client-index="${index}" aria-label="Excluir ${escapeHtml(client.nome)}"><img src="assets/icon-trash.svg" alt=""></button>
         </article>
-      `).join("")}
+      `).join("") : `<p class="staff-empty-orders">Nenhum cliente cadastrado.</p>`}
     </section>
   `;
+}
+function formatReportDate(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toLocaleDateString("pt-BR");
+  return date.toLocaleDateString("pt-BR");
+}
+
+function staffReportStats() {
+  const rows = new Map();
+  let totalItems = 0;
+  let totalRevenue = 0;
+
+  state.staffOrders.forEach((order) => {
+    const date = formatReportDate(order.createdAt);
+    const itemCount = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const orderTotal = Number(order.total || 0);
+    totalItems += itemCount;
+    totalRevenue += orderTotal;
+    const current = rows.get(date) || { date, items: 0, total: 0, orders: 0 };
+    current.items += itemCount;
+    current.total += orderTotal;
+    current.orders += 1;
+    rows.set(date, current);
+  });
+
+  return {
+    rows: [...rows.values()],
+    totalItems,
+    totalRevenue,
+    totalOrders: state.staffOrders.length,
+    averageTicket: state.staffOrders.length ? totalRevenue / state.staffOrders.length : 0
+  };
+}
+
+function staffProductReportStats() {
+  const rows = new Map();
+  state.staffOrders.forEach((order) => {
+    (order.items || []).forEach((item) => {
+      const productId = item.product_id || item.productId || item.nome;
+      const product = productById(productId);
+      const key = product?.id || item.nome;
+      const quantity = Number(item.quantity || 0);
+      const total = quantity * Number(item.unit_price || item.preco || 0);
+      const current = rows.get(key) || {
+        nome: item.nome,
+        categoria: product?.categoria || "Sem categoria",
+        quantity: 0,
+        total: 0
+      };
+      current.quantity += quantity;
+      current.total += total;
+      rows.set(key, current);
+    });
+  });
+  return [...rows.values()].sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, "pt-BR"));
 }
 
 function renderStaffReports() {
+  const stats = staffReportStats();
+  const productRows = staffProductReportStats();
+  const today = new Date().toLocaleDateString("pt-BR");
+  const rows = stats.rows.length ? stats.rows : [{ date: today, items: 0, total: 0, orders: 0 }];
+  const startDate = state.staffReportStartDate || rows[0].date;
+  const endDate = state.staffReportEndDate || rows[rows.length - 1].date;
+  const isProductReport = state.staffReportType === "product";
+  const reportLabel = isProductReport ? "Por produto vendido" : "Faturamento total";
   return `
-    ${renderStaffHeader("Relatórios", "")}
+    ${renderStaffHeader("Relat&oacute;rios", "")}
     <section class="report-filters">
-      <button class="report-select" data-action="staff-modal" data-modal="report-options">Faturamento total <span>⌄</span></button>
-      <label>Data inicial:<input value="01/05/2026"></label>
-      <label>Data final:<input value="01/05/2026"></label>
-      <button class="staff-primary small" data-action="generate-report">Gerar relatório</button>
+      <button class="report-select" data-action="staff-modal" data-modal="report-options">${reportLabel} <span class="report-chevron" aria-hidden="true"></span></button>
+      <label>Data inicial:<input name="reportStartDate" data-mask="date" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" value="${startDate}"></label>
+      <label>Data final:<input name="reportEndDate" data-mask="date" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" value="${endDate}"></label>
+      <button class="staff-primary small" data-action="generate-report">Gerar relat&oacute;rio</button>
     </section>
-    <section class="report-card">
-      <h3>RELATÓRIO DE FATURAMENTO</h3>
-      <p><strong>Período:</strong> 01/05/2026 - 01/05/2026</p>
-      <div class="report-grid">
-        <strong>DATA</strong><strong>QUANTIDADE DE ITENS VENDIDOS</strong><strong>VALOR TOTAL</strong>
-        <span>01/05/2026</span><span>20</span><span>R$450,00</span>
+    <section class="report-card ${isProductReport ? "is-product-report" : ""}">
+      <h3>${isProductReport ? "RELAT&Oacute;RIO POR PRODUTO VENDIDO" : "RELAT&Oacute;RIO DE FATURAMENTO"}</h3>
+      <p><strong>Per&iacute;odo:</strong> ${startDate} - ${endDate}</p>
+      <div class="report-kpis">
+        <article><span>Pedidos</span><strong>${stats.totalOrders}</strong></article>
+        <article><span>Itens vendidos</span><strong>${stats.totalItems}</strong></article>
+        <article><span>${isProductReport ? "Produtos vendidos" : "Ticket m&eacute;dio"}</span><strong>${isProductReport ? productRows.length : money(stats.averageTicket)}</strong></article>
       </div>
+      ${isProductReport ? `
+        <div class="report-grid report-product-grid">
+          <strong>PRODUTO</strong><strong>QUANTIDADE VENDIDA</strong><strong>VALOR TOTAL</strong>
+          ${productRows.length ? productRows.map((row) => `
+            <span><b>${escapeHtml(row.nome)}</b><small>${escapeHtml(row.categoria)}</small></span><span>${row.quantity}</span><span>${money(row.total)}</span>
+          `).join("") : `<span>Nenhum produto vendido</span><span>0</span><span>${money(0)}</span>`}
+        </div>
+      ` : `
+        <div class="report-grid">
+          <strong>DATA</strong><strong>QUANTIDADE DE ITENS VENDIDOS</strong><strong>VALOR TOTAL</strong>
+          ${rows.map((row) => `
+            <span>${row.date}</span><span>${row.items}</span><span>${money(row.total)}</span>
+          `).join("")}
+        </div>
+      `}
       <div class="report-summary">
-        <span>Valor total do período de vendas:</span><strong>R$450,00</strong>
-        <span>Quantidade de itens vendidas no período:</span><strong>20</strong>
+        <span>Valor total do per&iacute;odo de vendas:</span><strong>${money(stats.totalRevenue)}</strong>
+        <span>Quantidade de itens vendidas no per&iacute;odo:</span><strong>${stats.totalItems}</strong>
       </div>
     </section>
   `;
 }
-
 function renderStaffMenu() {
   return `
-    ${renderStaffHeader("Cardápio", "", `<button class="staff-primary small" data-action="staff-modal" data-modal="product">Cadastrar</button>`)}
-    <section class="admin-menu-grid">
-      ${products.slice(0, 12).map((product) => `
-        <article>
-          <div class="product-image" style='${cardImageStyle(product)}'></div>
-          <strong>${product.nome}</strong>
-          <span>${product.categoria}</span>
-          <em>${money(product.preco)}</em>
-        </article>
-      `).join("")}
+    ${renderStaffHeader("Card&aacute;pio", "", `<button class="staff-primary small" data-action="staff-modal" data-modal="product">Cadastrar</button>`)}
+    <section class="admin-menu-list">
+      ${categories.map((category, index) => {
+        const categoryProducts = products
+          .filter((product) => product.categoria === category)
+          .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+        return `
+          <section class="admin-menu-category">
+            <h3>${index + 1}. ${category}</h3>
+            <div class="admin-product-list">
+              ${categoryProducts.length ? categoryProducts.map((product) => `
+                <article class="admin-product-row ${product.active === false ? "is-inactive" : ""}">
+                  <div class="admin-product-thumb" style='${cardImageStyle(product)}'></div>
+                  <div class="admin-product-copy">
+                    <strong>${escapeHtml(product.nome)}</strong>
+                    <span>${escapeHtml(product.descricao || "Sem descri&ccedil;&atilde;o")}</span>
+                  </div>
+                  <em>${money(Number(product.preco || 0))}</em>
+                  <button class="admin-product-toggle ${product.active === false ? "is-off" : "is-on"}" data-action="toggle-product-active" data-product-id="${product.id}" aria-pressed="${product.active !== false}" aria-label="${product.active === false ? "Ativar" : "Desativar"} ${escapeHtml(product.nome)}"><span></span></button>
+                  <button class="staff-icon-danger" data-action="delete-product" data-product-id="${product.id}" aria-label="Excluir ${escapeHtml(product.nome)}"><img src="assets/icon-trash.svg" alt=""></button>
+                </article>
+              `).join("") : `<p class="staff-empty-orders">Nenhum produto nesta categoria.</p>`}
+            </div>
+          </section>
+        `;
+      }).join("")}
     </section>
   `;
 }
-
 function renderStaffSettings() {
+  const stats = staffReportStats();
+  const activeTables = new Set(state.staffOrders.filter((order) => order.status !== "Entregue").map((order) => order.mesa)).size;
+  const nowLabel = new Date().toLocaleString("pt-BR", { weekday: "long", day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit" });
   return `
-    ${renderStaffHeader("Configurações", "")}
-    <section class="settings-panel">
-      <div class="settings-line"><span>Impressoras:</span><button data-action="staff-modal" data-modal="printer">Configurar</button></div>
-      <div class="settings-line"><span>Mesas:</span><button data-action="staff-modal" data-modal="tables">Configurar</button></div>
-      <div class="settings-line"><span>Pagamentos:</span><button data-action="staff-modal" data-modal="payments">Configurar</button></div>
+    ${renderStaffHeader("Configura&ccedil;&otilde;es", "")}
+    <section class="settings-screen">
+      <div class="settings-main-area">
+        <section class="settings-config-strip">
+          ${[
+            ["Impressoras", "printer"],
+            ["Mesas", "tables"],
+            ["Pagamentos", "payments"]
+          ].map(([label, modal]) => `
+            <div class="settings-config-row">
+              <span class="settings-config-icon" aria-hidden="true"></span>
+              <strong>${label}:</strong>
+              <button data-action="staff-modal" data-modal="${modal}">Visualizar</button>
+              <button data-action="staff-modal" data-modal="${modal}">Configurar</button>
+            </div>
+          `).join("")}
+        </section>
+
+        <section class="settings-info-heading">
+          <h3>Informa&ccedil;&otilde;es</h3>
+          <span>${nowLabel}</span>
+        </section>
+
+        <section class="settings-info-grid">
+          <article class="settings-info-card"><h4>Status de Conex&atilde;o e Servi&ccedil;os</h4><p>Rede Wifi: ${apiOnline ? "Conectado" : "Modo local"}<br>Sincroniza&ccedil;&atilde;o Nuvem: ${apiOnline ? "Ativa" : "Aguardando servidor"}<br>Licen&ccedil;a do Software: Ativa</p></article>
+          <article class="settings-info-card"><h4>Resumo da Opera&ccedil;&atilde;o</h4><p>Usu&aacute;rios ativos: ${state.staffUser ? 1 : 0}<br>M&eacute;dia de tempo por atendimento: 16min<br>Mesas ocupadas: ${activeTables}/${staffTables.length}</p></article>
+          <article class="settings-info-card"><h4>Informa&ccedil;&otilde;es de Cadastro</h4><p>Produtos cadastrados: ${products.length}<br>Clientes cadastrados: ${state.staffClients.length}<br>M&eacute;todos de pagamento: 3</p></article>
+          <article class="settings-info-card"><h4>Informa&ccedil;&otilde;es do Dispositivo</h4><p>Nome do terminal: BREW-05<br>Pedidos registrados: ${stats.totalOrders}<br>&Uacute;ltima vers&atilde;o dispon&iacute;vel: 5.27.1</p></article>
+        </section>
+      </div>
+
+      <aside class="settings-side-area">
+        <article class="settings-tip-card"><h4>Dicas de Configura&ccedil;&atilde;o</h4><p>Mantenha sua impressora t&eacute;rmica sempre limpa. O ac&uacute;mulo de poeira do papel pode causar falhas no corte autom&aacute;tico e manchas na impress&atilde;o.</p></article>
+        <article class="settings-support-card"><h4>Suporte ao Sistema</h4><p><strong>Nome da Unidade:</strong> Brewers Caf&eacute;</p><p><strong>Suporte T&eacute;c.:</strong> (11) 98888-8888</p><p><strong>Hor&aacute;rio de Atend.:</strong> 09h &agrave;s 18h</p><p><strong>ID do Terminal:</strong> #BREW-05</p><p><strong>E-mail:</strong> suporte@brewers.com.br</p><p class="security-tip"><strong>Dica de Seguran&ccedil;a:</strong> Nossa equipe nunca solicitar&aacute; sua senha de administrador por telefone ou chat.</p></article>
+      </aside>
     </section>
-    <section class="settings-cards">
-      <article><strong>47</strong><span>Pedidos Hoje</span></article>
-      <article><strong>R$ 450,00</strong><span>Faturamento do Dia</span></article>
-      <article><strong>6/12</strong><span>Mesas Ativas</span></article>
-      <article><strong>3</strong><span>Formas de pagamento</span></article>
-    </section>
+    <footer class="settings-footer"><span>Sistema Operacional: <b class="online-dot"></b> Online</span><span>Vers&atilde;o: 5.26.1</span></footer>
+  `;
+}
+
+function renderSettingsPrinterModal() {
+  return `
+    <div class="settings-detail-list">
+      ${staffPrinters.map((printer) => `
+        <article>
+          <div><strong>${printer.label}</strong><span>${printer.device}</span></div>
+          <em class="settings-status is-online">${printer.status}</em>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSettingsTablesModal() {
+  const openOrdersByTable = new Map(
+    state.staffOrders
+      .filter((order) => order.status !== "Entregue")
+      .map((order) => [order.mesa, order])
+  );
+  return `
+    <div class="settings-detail-toolbar">
+      <button class="staff-primary small" data-action="staff-modal" data-modal="new-table">Cadastrar mesa</button>
+    </div>
+    <div class="settings-detail-list settings-table-list">
+      ${staffTables.map((table) => {
+        const order = openOrdersByTable.get(table);
+        return `
+          <article class="settings-table-row">
+            <div><strong>${table}</strong><span>${order ? `${order.status} &middot; ${money(Number(order.total || 0))}` : "Livre"}</span></div>
+            <em class="settings-status ${order ? "is-busy" : "is-free"}">${order ? "Ocupada" : "Livre"}</em>
+            <button class="staff-icon-danger" data-action="delete-table" data-table="${escapeHtml(table)}" ${order ? "disabled" : ""} aria-label="Excluir ${escapeHtml(table)}"><img src="assets/icon-trash.svg" alt=""></button>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderSettingsPaymentsModal() {
+  const totalsByMethod = paymentTotals();
+  return `
+    <div class="settings-detail-list settings-payment-list">
+      ${staffPaymentMethods.map((method) => `
+        <article>
+          <span class="payment-icon payment-icon-${method.icon}" aria-hidden="true">
+            <img src="${method.asset}" alt="" loading="eager" decoding="sync" onerror="this.remove()">
+          </span>
+          <div><strong>${method.label}</strong><span>${method.id === "Crédito" ? "Cart&atilde;o de cr&eacute;dito/d&eacute;bito" : "Ativo no terminal"}</span></div>
+          <em>${money(totalsByMethod[method.id] || 0)}</em>
+        </article>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -1197,13 +1457,16 @@ function renderModal() {
     return;
   }
 
-  if (state.pendingDeleteId) {
+  const deleteRequest = state.pendingDelete || (state.pendingDeleteId ? { type: "cart", label: "item" } : null);
+  if (deleteRequest) {
+    const deleteLabel = deleteRequest.label || "item";
     modalRoot.innerHTML = `
       <div class="modal-overlay">
-        <div class="delete-dialog" role="dialog" aria-modal="true" aria-label="Confirmação de exclusão">
-          <p>Confirma a exclusão do item?</p>
+        <div class="delete-dialog" role="dialog" aria-modal="true" aria-label="Confirmacao de exclusao">
+          <div class="delete-dialog-icon"><img src="assets/icon-trash.svg" alt=""></div>
+          <p>Confirma a exclus&atilde;o de ${escapeHtml(deleteLabel)}?</p>
           <div class="delete-actions">
-            <button class="no" data-action="cancel-delete">Não</button>
+            <button class="no" data-action="cancel-delete">N&atilde;o</button>
             <button class="yes" data-action="confirm-delete">Sim</button>
           </div>
         </div>
@@ -1211,7 +1474,6 @@ function renderModal() {
     `;
     return;
   }
-
   if (state.view === "checkout") {
     const values = totals();
     modalRoot.innerHTML = `
@@ -1264,8 +1526,8 @@ function renderStaffModal() {
     return `
       <div class="modal-overlay staff-modal-layer">
         <div class="report-options-popover">
-          <button data-action="close-staff-modal">Faturamento total</button>
-          <button data-action="close-staff-modal">Por produto vendido</button>
+          <button class="${state.staffReportType === "total" ? "is-active" : ""}" data-action="set-report-type" data-report-type="total">Faturamento total</button>
+          <button class="${state.staffReportType === "product" ? "is-active" : ""}" data-action="set-report-type" data-report-type="product">Por produto vendido</button>
         </div>
       </div>
     `;
@@ -1368,52 +1630,57 @@ function renderStaffModal() {
       `;
     })(),
     product: `
-      <div class="staff-form-grid">
-        <label>Nome<input value="Novo produto"></label>
-        <label>Categoria<select><option>Bebidas Quentes</option><option>Bebidas Geladas</option><option>Salgados</option><option>Doces</option></select></label>
-        <label>Preço<input value="R$"></label>
-        <label>Imagem<input value="Selecionar arquivo"></label>
+      <div class="product-form-modal">
+        <div class="product-form-row compact">
+          <label>Nome:<input name="productName" value="" autocomplete="off"></label>
+          <label>Valor:<input name="productPrice" value="" inputmode="decimal" placeholder="R$ 0,00"></label>
+        </div>
+        <label class="product-image-field">Imagem da capa:
+          <input type="file" accept="image/*" data-product-image-input>
+          <input type="hidden" name="productImageValue" value="">
+          <span class="product-image-preview" data-product-image-preview><img src="assets/icon-upload.svg" alt="" onerror="this.remove()"><span>Selecionar imagem</span></span>
+        </label>
+        <label>Categoria:
+          <select name="productCategory">
+            ${categories.map((cat) => `<option>${cat}</option>`).join("")}
+          </select>
+        </label>
+        <label>Descri&ccedil;&atilde;o:<textarea name="productDescription"></textarea></label>
+        <div class="product-addons-block">
+          <div class="product-addons-top"><strong>Adicionais:</strong><button type="button" class="staff-secondary tiny" data-action="noop">Criar novo grupo de adicionais</button></div>
+          <label>T&iacute;tulo:<input name="productAddonTitle" value="Op&ccedil;&otilde;es"></label>
+          <div class="product-addon-grid">
+            <span>Op&ccedil;&atilde;o:</span><span>Acr&eacute;scimo:</span><span></span>
+            ${[0,1,2].map(() => `
+              <input name="productOption[]" value="">
+              <input name="productOptionPrice[]" value="" inputmode="decimal">
+              <button type="button" class="product-addon-delete" data-action="clear-addon-row" aria-label="Excluir adicional"><img src="assets/icon-trash.svg" alt=""></button>
+            `).join("")}
+          </div>
+        </div>
       </div>
     `,
-    printer: `
-      <div class="staff-form-grid">
-        <label>Impressora principal<input value="Cozinha"></label>
-        <label>Status<select><option>Ativa</option><option>Inativa</option></select></label>
-      </div>
-    `,
-    tables: `
-      <div class="staff-config-list">
-        <div><span>Mesa 1</span><button data-action="staff-modal" data-modal="new-table">Cadastrar</button></div>
-        <div><span>Mesa 2</span><button>Editar</button></div>
-        <div><span>Mesa 3</span><button>Editar</button></div>
-      </div>
-    `,
-    payments: `
-      <div class="staff-config-list">
-        <div><span>Pix</span><button>Editar</button></div>
-        <div><span>Dinheiro</span><button>Editar</button></div>
-        <div><span>Crédito</span><button>Editar</button></div>
-      </div>
-      <button class="staff-primary small" data-action="staff-modal" data-modal="new-payment">Cadastrar</button>
-    `,
-    "new-table": `<label class="staff-money-label">Número da mesa<input value="Mesa 10"></label>`,
+    printer: renderSettingsPrinterModal(),
+    tables: renderSettingsTablesModal(),
+    payments: renderSettingsPaymentsModal(),
+    "new-table": `<label class="staff-money-label">Nome da mesa<input name="tableName" value="${nextStaffTableName()}" autocomplete="off"></label>`,
     client: `
-      <div class="staff-form-grid">
-        <label>Nome<input value=""></label>
-        <label>CPF<input value=""></label>
-        <label>Celular<input value=""></label>
-        <label>Data de Nascimento<input value=""></label>
-        <label>Endereço<input value=""></label>
+      <div class="staff-form-grid client-form-grid">
+        <label>Nome<input name="clientName" value="" autocomplete="off"></label>
+        <label>CPF<input name="clientCpf" value="" inputmode="numeric" data-mask="cpf" placeholder="000.xxx.xxx-00"></label>
+        <label>Celular<input name="clientPhone" value="" inputmode="numeric" data-mask="phone" placeholder="(00) 0 0000-0000"></label>
+        <label>Data de Nascimento<input name="clientBirth" value="" inputmode="numeric" data-mask="birthday" placeholder="dd/mm/aaaa"></label>
+        <label class="client-address-field">Endere&ccedil;o<input name="clientAddress" value="" autocomplete="off"></label>
       </div>
-    `,
-    "new-payment": `<label class="staff-money-label">Forma de pagamento<input value="Voucher"></label>`
+    `,    "new-payment": `<label class="staff-money-label">Forma de pagamento<input value="Voucher"></label>`
   };
 
   const saveActions = {
     "cash-open": "save-cash-open",
     fechamento: "save-cash-close",
     product: "save-product",
-    client: "save-client"
+    client: "save-client",
+    "new-table": "save-new-table"
   };
   const saveAction = saveActions[modal] || "close-staff-modal";
   return renderStaffDialog(titles[modal] || "Painel", bodyByModal[modal] || "", `
@@ -1478,6 +1745,33 @@ function wireStaticFields() {
   if (notes) {
     notes.addEventListener("input", (event) => {
       state.detailNotes = event.target.value;
+    });
+  }
+
+  document.querySelectorAll("[data-mask]").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const mask = event.target.dataset.mask;
+      if (mask === "cpf") event.target.value = formatCpfDisplay(event.target.value);
+      if (mask === "phone") event.target.value = formatPhoneInput(event.target.value);
+      if (mask === "birthday" || mask === "date") event.target.value = formatBirthDateInput(event.target.value);
+    });
+  });
+
+  const productImageInput = document.querySelector("[data-product-image-input]");
+  if (productImageInput) {
+    productImageInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      const dataUrl = await readFileAsDataUrl(file);
+      const dialog = event.target.closest(".staff-dialog");
+      const hidden = dialog?.querySelector("[name='productImageValue']");
+      const preview = dialog?.querySelector("[data-product-image-preview]");
+      if (hidden) hidden.value = dataUrl;
+      if (preview && dataUrl) {
+        const label = preview.querySelector("span");
+        if (label) label.textContent = file?.name || "Imagem selecionada";
+        preview.style.backgroundImage = `url("${dataUrl}")`;
+        preview.classList.add("has-image");
+      }
     });
   }
 
@@ -1605,19 +1899,18 @@ document.addEventListener("click", (event) => {
     "decrease-cart": () => updateCartQty(target.dataset.cartId, -1),
     "request-delete": () => {
       state.pendingDeleteId = target.dataset.cartId;
+      const item = state.cart.find((entry) => entry.uid === state.pendingDeleteId);
+      state.pendingDelete = { type: "cart", cartId: state.pendingDeleteId, label: item?.nome || "item" };
       render();
     },
     "cancel-delete": () => {
       const item = state.cart.find((entry) => entry.uid === state.pendingDeleteId);
       if (item && item.quantity < 1) item.quantity = 1;
       state.pendingDeleteId = null;
+      state.pendingDelete = null;
       render();
     },
-    "confirm-delete": () => {
-      state.cart = state.cart.filter((item) => item.uid !== state.pendingDeleteId);
-      state.pendingDeleteId = null;
-      render();
-    },
+    "confirm-delete": () => confirmPendingDelete(),
     checkout: () => {
       if (state.cart.length) {
         state.view = "checkout";
@@ -1652,6 +1945,11 @@ document.addEventListener("click", (event) => {
       state.staffModal = target.dataset.modal;
       render();
     },
+    "set-report-type": () => {
+      state.staffReportType = target.dataset.reportType === "product" ? "product" : "total";
+      state.staffModal = null;
+      render();
+    },
     "close-staff-modal": () => {
       if ((state.staffModal === "order-detail" || state.staffModal === "table-detail") && state.staffOrderSnapshot) {
         const order = selectedStaffOrder();
@@ -1668,10 +1966,35 @@ document.addEventListener("click", (event) => {
     "save-cash-close": () => saveCashClose(),
     "save-product": () => saveProductFromModal(target),
     "save-client": () => saveClientFromModal(target),
+    "save-new-table": () => saveNewTableFromModal(target),
+    "delete-client": () => {
+      const client = state.staffClients[Number(target.dataset.clientIndex)];
+      requestDeleteConfirmation("client", client?.nome || "cliente", {
+        clientId: target.dataset.clientId,
+        clientIndex: target.dataset.clientIndex
+      });
+    },
+    "toggle-product-active": () => toggleProductActive(target.dataset.productId),
+    "delete-product": () => {
+      const product = productById(target.dataset.productId);
+      requestDeleteConfirmation("product", product?.nome || "produto", { productId: target.dataset.productId });
+    },
+    "clear-addon-row": () => {
+      const rowButton = target;
+      const priceInput = rowButton.previousElementSibling;
+      const optionInput = priceInput?.previousElementSibling;
+      if (optionInput) optionInput.value = "";
+      if (priceInput) priceInput.value = "";
+    },
+    noop: () => {},
     "advance-order": () => advanceOrder(target.dataset.orderId),
     "staff-order-detail": () => {
       state.selectedStaffOrderId = target.dataset.orderId;
       const order = state.staffOrders.find((o) => String(o.id) === String(target.dataset.orderId));
+      if (order?.status === "Entregue") {
+        showToast("Pedidos entregues não podem ser editados.");
+        return;
+      }
       if (order) {
         state.staffOrderSnapshot = JSON.parse(JSON.stringify({ items: order.items, total: order.total }));
       }
@@ -1763,12 +2086,12 @@ document.addEventListener("click", (event) => {
     },
     "table-flow-item-increase": () => {
       const uid = target.dataset.uid;
-      const item = state.staffTableFlow.items.find((i) => (i.uid || i.id) === uid);
+      const item = state.staffTableFlow.items.find((i) => String(i.uid || i.id || i.productId) === String(uid));
       if (item) { item.quantity = (item.quantity || 1) + 1; render(); }
     },
     "table-flow-item-decrease": () => {
       const uid = target.dataset.uid;
-      const idx = state.staffTableFlow.items.findIndex((i) => (i.uid || i.id) === uid);
+      const idx = state.staffTableFlow.items.findIndex((i) => String(i.uid || i.id || i.productId) === String(uid));
       if (idx < 0) return;
       const item = state.staffTableFlow.items[idx];
       item.quantity = (item.quantity || 1) - 1;
@@ -1777,7 +2100,7 @@ document.addEventListener("click", (event) => {
     },
     "table-flow-item-remove": () => {
       const uid = target.dataset.uid;
-      state.staffTableFlow.items = state.staffTableFlow.items.filter((i) => (i.uid || i.id) !== uid);
+      state.staffTableFlow.items = state.staffTableFlow.items.filter((i) => String(i.uid || i.id || i.productId) !== String(uid));
       render();
     },
     "table-flow-payment-method": () => {
@@ -1787,7 +2110,15 @@ document.addEventListener("click", (event) => {
     "table-flow-lancar": () => tableFlowLancar(),
     "table-flow-confirm-payment": () => tableFlowConfirmPayment(),
     "table-flow-print": () => showToast("Conta enviada para impressão"),
-    "generate-report": () => showToast("Relatório gerado"),
+    "generate-report": () => {
+      updateReportDatesFromInputs();
+      render();
+      showToast("Relatório gerado");
+    },
+    "delete-table": () => {
+      const tableName = target.dataset.table;
+      requestDeleteConfirmation("table", tableName || "mesa", { tableName });
+    },
     "show-toast": () => showToast(target.dataset.message || "Ação realizada"),
     "confirm-payment": () => {
       // salva a forma de pagamento no pedido
@@ -1991,6 +2322,19 @@ function slugify(value) {
     .replace(/^-|-$/g, "") || `produto-${Date.now()}`;
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
 function localOrderFromCart(cartItems) {
   return {
     id: `local-${Date.now()}`,
@@ -2064,50 +2408,186 @@ async function saveCashClose() {
 
 async function saveProductFromModal(target) {
   const dialog = target.closest(".staff-dialog");
-  const inputs = [...dialog.querySelectorAll("input")];
-  const category = dialog.querySelector("select")?.value || "Bebidas Quentes";
-  const nome = inputs[0]?.value.trim() || "Novo produto";
-  const preco = parseMoneyInput(inputs[1]?.value);
-  const imagem = inputs[2]?.value.trim();
+  const nome = dialog.querySelector("[name='productName']")?.value.trim();
+  if (!nome) {
+    showToast("Informe o nome do produto.");
+    return;
+  }
+  const category = dialog.querySelector("[name='productCategory']")?.value || "Bebidas Quentes";
+  const preco = parseMoneyInput(dialog.querySelector("[name='productPrice']")?.value);
+  const descricao = dialog.querySelector("[name='productDescription']")?.value.trim() || "Produto cadastrado pelo painel.";
+  const fileInput = dialog.querySelector("[data-product-image-input]");
+  const imageValue = dialog.querySelector("[name='productImageValue']")?.value || "";
+  const imagem = imageValue || await readFileAsDataUrl(fileInput?.files?.[0]) || "assets/logo-brewers.svg";
+  const optionInputs = [...dialog.querySelectorAll("[name='productOption[]']")];
+  const priceInputs = [...dialog.querySelectorAll("[name='productOptionPrice[]']")];
+  const opcoes = optionInputs
+    .map((input, index) => {
+      const label = input.value.trim();
+      if (!label) return "";
+      const price = parseMoneyInput(priceInputs[index]?.value);
+      return price > 0 ? `${label} | + R$${price.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : label;
+    })
+    .filter(Boolean);
   const product = {
     id: slugify(nome),
     nome,
     categoria: category,
-    descricao: "Produto cadastrado pelo painel.",
+    descricao,
     preco,
     tamanho: "",
-    opcoes: [],
-    imagem: imagem && imagem !== "Selecionar arquivo" ? imagem : "assets/placeholder.png",
-    frame: "Cadastro do atendente"
+    opcoes,
+    imagem,
+    frame: "Cadastro do atendente",
+    active: true
   };
 
-  await apiRequest("/api/products", {
+  const data = await apiRequest("/api/products", {
     method: "POST",
     body: JSON.stringify(product)
   });
-  products = [product, ...products.filter((item) => item.id !== product.id)];
+  const savedProduct = data?.product || product;
+  products = [savedProduct, ...products.filter((item) => item.id !== savedProduct.id)];
   state.staffModal = null;
   render();
 }
 
 async function saveClientFromModal(target) {
   const dialog = target.closest(".staff-dialog");
-  const inputs = [...dialog.querySelectorAll("input")];
+  const nome = dialog.querySelector("[name='clientName']")?.value.trim();
+  if (!nome) {
+    showToast("Informe o nome do cliente.");
+    return;
+  }
   const client = {
-    nome: inputs[0]?.value.trim() || "Novo cliente",
-    cpf: inputs[1]?.value.trim() || "",
-    celular: inputs[2]?.value.trim() || "",
-    nascimento: inputs[3]?.value.trim() || "",
-    endereco: inputs[4]?.value.trim() || ""
+    nome,
+    cpf: formatCpfDisplay(dialog.querySelector("[name='clientCpf']")?.value || ""),
+    celular: formatPhoneInput(dialog.querySelector("[name='clientPhone']")?.value || ""),
+    nascimento: formatBirthDateInput(dialog.querySelector("[name='clientBirth']")?.value || ""),
+    endereco: dialog.querySelector("[name='clientAddress']")?.value.trim() || ""
   };
 
-  await apiRequest("/api/clients", {
+  const data = await apiRequest("/api/clients", {
     method: "POST",
     body: JSON.stringify(client)
   });
-  state.staffClients = [client, ...state.staffClients];
+  state.staffClients = [data?.client || client, ...state.staffClients];
   state.staffModal = null;
   render();
+}
+
+function saveNewTableFromModal(target) {
+  const dialog = target.closest(".staff-dialog");
+  const rawName = dialog?.querySelector("[name='tableName']")?.value.trim();
+  const tableName = rawName || nextStaffTableName();
+  const exists = staffTables.some((table) => table.toLowerCase() === tableName.toLowerCase());
+  if (exists) {
+    showToast("Essa mesa já existe.");
+    return;
+  }
+
+  staffTables.push(tableName);
+  staffTables.sort((a, b) => {
+    const aNum = Number(String(a).match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
+    const bNum = Number(String(b).match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
+    if (aNum !== bNum) return aNum - bNum;
+    return a.localeCompare(b, "pt-BR");
+  });
+  saveStaffTables();
+  state.staffModal = "tables";
+  render();
+  showToast(`${tableName} cadastrada.`);
+}
+
+function updateReportDatesFromInputs() {
+  const start = document.querySelector("[name='reportStartDate']")?.value || "";
+  const end = document.querySelector("[name='reportEndDate']")?.value || "";
+  state.staffReportStartDate = formatBirthDateInput(start);
+  state.staffReportEndDate = formatBirthDateInput(end);
+}
+
+function deleteTableFromSettings(tableName) {
+  const hasOpenOrder = state.staffOrders.some((order) => order.mesa === tableName && order.status !== "Entregue");
+  if (hasOpenOrder) {
+    showToast("Não é possível excluir uma mesa ocupada.");
+    return;
+  }
+  const index = staffTables.findIndex((table) => table === tableName);
+  if (index < 0) return;
+  staffTables.splice(index, 1);
+  saveStaffTables();
+  state.staffModal = "tables";
+  render();
+  showToast(`${tableName} excluída.`);
+}
+
+async function deleteClientFromTable(clientId, clientIndex) {
+  const index = Number(clientIndex);
+  if (clientId) {
+    await apiRequest(`/api/clients/${clientId}`, { method: "DELETE" });
+  }
+  state.staffClients = state.staffClients.filter((client, idx) => {
+    if (clientId) return String(client.id) !== String(clientId);
+    return idx !== index;
+  });
+  render();
+}
+
+async function toggleProductActive(productId) {
+  const product = productById(productId);
+  if (!product) return;
+  const nextActive = product.active === false;
+  product.active = nextActive;
+  const data = await apiRequest(`/api/products/${productId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ active: nextActive })
+  });
+  if (data?.product) {
+    products = products.map((item) => item.id === productId ? data.product : item);
+  }
+  render();
+}
+
+async function deleteProductFromMenu(productId) {
+  const product = productById(productId);
+  if (!product) return;
+  await apiRequest(`/api/products/${productId}`, { method: "DELETE" });
+  products = products.filter((item) => item.id !== productId);
+  render();
+}
+
+function requestDeleteConfirmation(type, label, payload = {}) {
+  state.pendingDelete = { type, label, ...payload };
+  render();
+}
+
+async function confirmPendingDelete() {
+  const request = state.pendingDelete;
+  if (!request) {
+    state.cart = state.cart.filter((item) => item.uid !== state.pendingDeleteId);
+    state.pendingDeleteId = null;
+    render();
+    return;
+  }
+
+  state.pendingDelete = null;
+  if (request.type === "client") {
+    await deleteClientFromTable(request.clientId, request.clientIndex);
+    return;
+  }
+  if (request.type === "product") {
+    await deleteProductFromMenu(request.productId);
+    return;
+  }
+  if (request.type === "table") {
+    deleteTableFromSettings(request.tableName);
+    return;
+  }
+  if (request.type === "cart") {
+    state.cart = state.cart.filter((item) => item.uid !== request.cartId);
+    state.pendingDeleteId = null;
+    render();
+  }
 }
 
 function openDetail(productId) {
@@ -2436,10 +2916,13 @@ function renderFlowPagamentoTab() {
 
         <p class="pagamento-method-label">Forma de Pagamento</p>
         <div class="pagamento-methods">
-          ${["Cartão", "Dinheiro", "Pix"].map((m) => `
-            <button class="pagamento-method-btn ${method === m ? "is-active" : ""}"
-                    data-action="table-flow-payment-method" data-method="${m}">
-              ${m === "Cartão" ? "💳 " : m === "Dinheiro" ? "💵 " : "📱 "}${m}
+          ${staffPaymentMethods.map((m) => `
+            <button class="pagamento-method-btn ${method === m.id ? "is-active" : ""}"
+                    data-action="table-flow-payment-method" data-method="${m.id}">
+              <span class="payment-icon payment-icon-${m.icon}" aria-hidden="true">
+                <img src="${m.asset}" alt="" loading="eager" decoding="sync" onerror="this.remove()">
+              </span>
+              ${m.label}
             </button>
           `).join("")}
         </div>
@@ -2583,6 +3066,12 @@ async function tableFlowConfirmPayment() {
   state.staffView = "orders";
   render();
 }
+
+window.setInterval(() => {
+  if (state.view === "staff" && state.staffView === "overview" && !state.staffModal && !state.staffTableFlow.active) {
+    render();
+  }
+}, 60000);
 
 render();
 bootstrap();
