@@ -1246,23 +1246,41 @@ function renderOrdersTable(orders) {
   return `
     <section class="staff-table">
       <div class="staff-table-head">
-        <span>Mesa/Pedido</span><span>Itens do Pedido</span><span>Hora</span><span>Status</span><span>Pagamento</span><span>Ações</span>
+        <span>Mesa/Pedido</span>
+        <span>Itens do Pedido</span>
+        <span>Hora</span>
+        <span>Status</span>
+        <span>Ações</span>
+        <span>Pagamento</span>
       </div>
-      ${orders.length ? orders.map((order) => `
-        <article class="staff-order-row">
-          <strong class="table-pill">${escapeHtml(orderDisplayLabel(order))}</strong>
-          <span>${order.itens}</span>
-          <span class="muted">${order.hora}</span>
-          <span class="status-badge ${statusClass(order.status)}">${order.status}</span>
-          <span class="status-badge ${paymentStatusClass(order)}">${paymentStatusLabel(order)}</span>
-          <div class="row-actions">
-            ${order.status !== "Entregue" ? `<button class="staff-mini-primary" data-action="advance-order" data-order-id="${order.id}">Avançar Status</button>` : ""}
-            ${order.status !== "Entregue"
-              ? `<button class="staff-mini-light" data-action="staff-order-detail" data-order-id="${order.id}">Editar</button>`
-              : `<button class="staff-mini-light is-disabled" disabled>Entregue</button>`}
-          </div>
-        </article>
-      `).join("") : `<p class="staff-empty-orders">Nenhum pedido aberto no momento.</p>`}
+
+      ${orders.length ? orders.map((order) => {
+        const paid = isOrderPaid(order);
+        const delivered = order.status === "Entregue";
+
+        return `
+          <article class="staff-order-row">
+            <strong class="table-pill">${escapeHtml(orderDisplayLabel(order))}</strong>
+            <span>${order.itens}</span>
+            <span class="muted">${order.hora}</span>
+            <span class="status-badge ${statusClass(order.status)}">${order.status}</span>
+
+            <div class="row-actions">
+              ${!delivered
+                ? `<button class="staff-mini-primary" data-action="advance-order" data-order-id="${order.id}">Avançar Status</button>`
+                : ""}
+
+              ${paid
+                ? `<button class="staff-mini-light is-disabled" disabled>Pago</button>`
+                : delivered
+                  ? `<button class="staff-mini-light is-disabled" disabled>Entregue</button>`
+                  : `<button class="staff-mini-light" data-action="staff-order-detail" data-order-id="${order.id}">Editar</button>`}
+            </div>
+
+            <span class="status-badge ${paymentStatusClass(order)}">${paymentStatusLabel(order)}</span>
+          </article>
+        `;
+      }).join("") : `<p class="staff-empty-orders">Nenhum pedido aberto no momento.</p>`}
     </section>
   `;
 }
@@ -1368,7 +1386,7 @@ function paymentStatusLabel(order) {
 }
 
 function paymentStatusClass(order) {
-  return isOrderPaid(order) ? "done" : "new";
+  return isOrderPaid(order) ? "payment-paid" : "payment-unpaid";
 }
 
 

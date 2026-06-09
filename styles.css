@@ -1846,7 +1846,7 @@ button {
 .staff-table-head,
 .staff-order-row {
   display: grid;
-  grid-template-columns: 92px minmax(220px, 1fr) 68px 100px 100px minmax(220px, 249px);
+  grid-template-columns: 92px minmax(220px, 1fr) 68px 100px minmax(220px, 249px) 104px;
   align-items: center;
   column-gap: 16px;
 }
@@ -1925,34 +1925,50 @@ button {
   color: var(--color-muted);
 }
 
+.status-badge.payment-paid {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.status-badge.payment-unpaid {
+  background: #fde7e7;
+  color: #b42318;
+}
+
 .row-actions {
   display: flex;
-  gap: 57px;
+  gap: 10px;
   align-items: center;
+  justify-content: flex-start;
 }
 
 .row-actions .staff-mini-light:only-child {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .staff-mini-primary,
 .staff-mini-light {
-  min-height: 30px;
+  width: 108px;
+  height: 32px;
+  min-height: 32px;
   border-radius: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   box-shadow: var(--shadow-button);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 0 8px;
 }
 
 .staff-mini-primary {
-  width: 87px;
   background: var(--color-brand);
   color: #fff;
 }
 
 .staff-mini-light {
-  width: 105px;
-  font-size: 12px;
   background: var(--color-surface-muted);
   color: var(--color-brand-dark);
 }
