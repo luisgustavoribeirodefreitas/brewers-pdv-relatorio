@@ -3098,7 +3098,7 @@ button {
   grid-template-columns: repeat(3, 266px);
   gap: 6px;
   align-items: end;
-  margin-left: 0;
+  margin-left: 6px;
   width: auto;
   max-width: none;
 }
