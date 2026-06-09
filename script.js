@@ -426,7 +426,7 @@ clearLegacyStaffStorage();
 
 const state = {
   view: window.location.hash === "#atendente" ? "staff-login" : "welcome",
-  currentTable: randomTable(),
+  currentTable: "",
   category: "Bebidas Quentes",
   selectedProductId: null,
   detailQty: 1,
@@ -693,8 +693,8 @@ function syncOrders() {
       state.view === "welcome" ||
       (state.view === "menu" && state.cart.length === 0);
 
-    if (currentTableIsOccupied && canChangeClientTable) {
-      state.currentTable = randomAvailableTable() || randomTable();
+    if ((!state.currentTable || currentTableIsOccupied) && canChangeClientTable) {
+      state.currentTable = randomAvailableTable() || "";
     }
 
     render();
@@ -736,7 +736,7 @@ async function bootstrap() {
 
 function setView(view) {
   if (view === "welcome") {
-    state.currentTable = randomAvailableTable() || randomTable();
+    state.currentTable = randomAvailableTable() || "";
     state.cart = [];
   }
 
@@ -838,8 +838,8 @@ function renderWelcome() {
         <div class="logo-mark" aria-hidden="true"><img src="assets/logo-brewers.svg" alt=""></div>
         <h1 class="welcome-title">BREWERS</h1>
         <div class="welcome-line"></div>
-        <p class="welcome-table">${state.currentTable}</p>
-        <button class="primary-button" data-action="start">Toque para iniciar</button>
+        <p class="welcome-table">${state.currentTable || "Carregando mesa..."}</p>
+        <button class="primary-button" data-action="start" ${state.currentTable ? "" : "disabled"}>Toque para iniciar</button>
         <button class="staff-link" data-action="staff-login">Área do atendente</button>
       </div>
     </section>
