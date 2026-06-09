@@ -3046,101 +3046,87 @@ button {
 
 .table-flow {
   display: grid;
-  grid-template-rows: 64px 44px minmax(0, 1fr);
+  grid-template-rows: 75px 49px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--color-background);
 }
 
 .table-flow-topbar {
   flex-direction: row;
   justify-content: flex-start;
   align-items: center;
-  gap: 24px;
+  gap: 0;
   padding: 0 24px;
-  height: 64px;
-  min-height: 64px;
+  height: 75px;
+  min-height: 75px;
+  background: #fff;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .table-flow-header-left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 0;
 }
 
 .table-flow-back-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--color-surface-muted);
+  display: none;
+}
+
+.table-flow-topbar h2 {
+  margin: 0;
   color: var(--color-header);
-  font-size: 18px;
-  font-weight: 700;
-  cursor: pointer;
-  border: none;
-  display: grid;
-  place-items: center;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
 }
 
 .table-flow-tabs-wrap {
-  min-height: 44px;
-  padding: 8px 24px 9px;
+  height: 49px;
+  min-height: 49px;
+  padding: 14px 0 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-background);
+  align-items: flex-start;
+  justify-content: flex-start;
+  background: #f3eee5;
 }
 
-/* Figma: 3 abas independentes, cada uma ~213px x 27px,
-   centralizadas abaixo do cabecalho da mesa. */
 .table-flow-tabs {
-  display: flex;
-  gap: 0;
-  align-items: center;
-  width: 639px;
-  max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 266px);
+  gap: 6px;
+  align-items: end;
+  margin-left: 0;
+  width: auto;
+  max-width: none;
 }
 
 .table-flow-tab {
-  flex: 0 1 213px;
-  height: 27px;
-  border: 1.5px solid #c8b8a2;
-  background: #f0e8dc;
-  color: #998c7f;
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0;
+  width: 266px;
+  height: 35px;
+  border: 0;
+  background: #e8dfd1;
+  color: #9a8d80;
+  font-weight: 700;
+  font-size: 14px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
   padding: 0;
-  border-radius: 0;
+  border-radius: 12px 12px 0 0;
   white-space: nowrap;
-  /* abas coladas: cancela borda dupla entre vizinhas */
-  margin-right: -1.5px;
-  position: relative;
-}
-
-.table-flow-tab:first-child {
-  border-radius: 6px 0 0 6px;
-}
-
-.table-flow-tab:last-child {
-  border-radius: 0 6px 6px 0;
-  margin-right: 0;
+  box-shadow: none;
 }
 
 .table-flow-tab:hover:not(.is-active) {
-  background: #e8ddd0;
-  color: #5c3317;
-  z-index: 1;
+  background: #ded3c5;
+  color: var(--color-brand-dark);
 }
 
 .table-flow-tab.is-active {
-  background: #5c3317;
+  background: #9d9286;
   color: #fff;
-  font-weight: 700;
-  border-color: #5c3317;
-  z-index: 2;
+  font-weight: 800;
 }
 
 .table-flow-content {
