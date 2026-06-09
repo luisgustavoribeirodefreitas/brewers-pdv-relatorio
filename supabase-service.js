@@ -23,11 +23,10 @@ export async function getProducts() {
   const { data, error } = await supabase
     .from("products")
     .select("*")
-    .eq("active", true);
+    .order("categoria", { ascending: true })
+    .order("nome", { ascending: true });
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data || [];
 }
@@ -95,12 +94,12 @@ export async function saveProduct(product) {
 export async function deleteProduct(productId) {
   const { error } = await supabase
     .from("products")
-    .update({ active: false })
-    .eq("id", String(productId));
+    .delete()
+    .eq("id", productId);
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
+
+  return true;
 }
 
 /* =========================
@@ -356,7 +355,7 @@ export async function createOrder(order) {
 
   const orderData = {
     id: orderId,
-    mesa: order.mesa || order.table || "Mesa 1",
+    mesa: order.mesa ?? order.table ?? "",
     status: order.status || "Novo",
     hora:
       order.hora ||
@@ -373,9 +372,11 @@ export async function createOrder(order) {
     created_at: new Date().toISOString()
   };
 
-  const { error: orderError } = await supabase
+  const { data: savedOrder, error: orderError } = await supabase
     .from("orders")
-    .upsert(orderData, { onConflict: "id" });
+    .insert(orderData)
+    .select()
+    .single();
 
   if (orderError) {
     throw orderError;
@@ -404,7 +405,7 @@ export async function createOrder(order) {
     }
   }
 
-  return normalizeOrder(orderData, items);
+  return normalizeOrder(savedOrder, items);
 }
 
 export async function updateOrderStatus(orderId, status) {

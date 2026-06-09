@@ -571,12 +571,17 @@ function productsByCategory(category) {
 function orderFromApi(order) {
   return {
     id: String(order.id),
-    mesa: order.mesa,
+    numero: order.numero,
+    mesa: order.mesa || "",
     itens: order.items_summary || (order.items || []).map((item) => `${item.nome} x ${item.quantity}`).join(", "),
     hora: order.hora,
     createdAt: order.created_at,
     status: order.status,
-    total: order.total,
+    subtotal: Number(order.subtotal || 0),
+    service: Number(order.service || 0),
+    total: Number(order.total || 0),
+    payment: order.payment || "",
+    client: order.client || null,
     items: order.items || []
   };
 }
@@ -1164,11 +1169,7 @@ function renderStaffOverview() {
   const prep = state.staffOrders.filter((order) => order.status === "Em preparo").length;
   const delivered = state.staffOrders.filter((order) => order.status === "Entregue").length;
   const todayOrders = state.staffOrders.length;
-  const activeTables = new Set(
-    state.staffOrders
-      .filter(isOpenStaffOrder)
-      .map((order) => order.mesa)
-  ).size;
+  const activeTables = activeStaffTableCount();
   const totalTables = staffTables.length;
   const cashLabel = state.cashOpen ? "Caixa aberto" : "Abrir Caixa";
   const cashAction = state.cashOpen ? "cash-menu" : "open-cash-modal";
@@ -1208,11 +1209,11 @@ function renderOrdersTable(orders) {
   return `
     <section class="staff-table">
       <div class="staff-table-head">
-        <span>Mesa</span><span>Itens do Pedido</span><span>Hora</span><span>Status</span><span>Ações</span>
+        <span>Mesa/Pedido</span><span>Itens do Pedido</span><span>Hora</span><span>Status</span><span>Ações</span>
       </div>
       ${orders.length ? orders.map((order) => `
         <article class="staff-order-row">
-          <strong class="table-pill">${order.mesa}</strong>
+          <strong class="table-pill">${escapeHtml(orderDisplayLabel(order))}</strong>
           <span>${order.itens}</span>
           <span class="muted">${order.hora}</span>
           <span class="status-badge ${statusClass(order.status)}">${order.status}</span>
@@ -1241,12 +1242,59 @@ function isOpenStaffOrder(order) {
   return order && !closedOrderStatuses.has(normalizePlainText(order.status));
 }
 
+function isOrderLinkedToStaffTable(order) {
+  const mesa = normalizePlainText(order?.mesa);
+  if (!mesa) return false;
+
+  return staffTables.some((table) => normalizePlainText(table) === mesa);
+}
+
+function activeStaffTableCount() {
+  return new Set(
+    state.staffOrders
+      .filter((order) => isOpenStaffOrder(order) && isOrderLinkedToStaffTable(order))
+      .map((order) => normalizePlainText(order.mesa))
+  ).size;
+}
+
+function formatOrderNumber(numero) {
+  const number = Number(numero);
+
+  return Number.isFinite(number) && number > 0
+    ? String(number).padStart(2, "0")
+    : "--";
+}
+
+function firstClientNameFromOrder(order) {
+  const clientRef = order?.client;
+  if (!clientRef) return "";
+
+  const client = state.staffClients.find((entry, index) =>
+    String(entry.id) === String(clientRef) ||
+    String(index) === String(clientRef) ||
+    normalizePlainText(entry.nome) === normalizePlainText(clientRef)
+  );
+
+  const name = client?.nome || clientRef;
+
+  return String(name).trim().split(/\s+/)[0] || "";
+}
+
+function orderDisplayLabel(order) {
+  if (isOrderLinkedToStaffTable(order)) return order.mesa;
+
+  const clientName = firstClientNameFromOrder(order);
+  if (clientName) return clientName;
+
+  return `#${formatOrderNumber(order?.numero)}`;
+}
+
 function renderStaffTables() {
   const tablesWithOrders = new Set(
-    state.staffOrders
-      .filter(isOpenStaffOrder)
-      .map((o) => o.mesa)
-  );
+  state.staffOrders
+    .filter((order) => isOpenStaffOrder(order) && isOrderLinkedToStaffTable(order))
+    .map((order) => order.mesa)
+);
   return `
     ${renderStaffHeader("Mesas", "", `<button class="staff-primary small" data-action="new-order">+ Novo Pedido</button>`)}
     <section class="tables-grid">
@@ -1468,7 +1516,7 @@ function renderStaffMenu() {
 }
 function renderStaffSettings() {
   const stats = staffReportStats();
-  const activeTables = new Set(state.staffOrders.filter(isOpenStaffOrder).map((order) => order.mesa)).size;
+  const activeTables = activeStaffTableCount();
   const nowLabel = currentStaffDateTimeLabel();
   return `
     ${renderStaffHeader("Configura&ccedil;&otilde;es", "")}
@@ -1526,9 +1574,9 @@ function renderSettingsPrinterModal() {
 
 function renderSettingsTablesModal() {
   const openOrdersByTable = new Map(
-    state.staffOrders
-      .filter(isOpenStaffOrder)
-      .map((order) => [order.mesa, order])
+  state.staffOrders
+    .filter((order) => isOpenStaffOrder(order) && isOrderLinkedToStaffTable(order))
+    .map((order) => [order.mesa, order])
   );
   return `
     <div class="settings-detail-toolbar">
@@ -2520,7 +2568,7 @@ async function finalizeOrder() {
   try {
     const savedOrder = await createOrder(order);
 
-    state.lastOrderNumber = String(savedOrder?.numero || "").padStart(2, "0");;
+    state.lastOrderNumber = formatOrderNumber(savedOrder?.numero);
 
     await syncOrders();
 
@@ -2808,15 +2856,13 @@ async function deleteProductFromMenu(productId) {
   try {
     await deleteProduct(productId);
 
-    products = products.map((item) =>
-      item.id === productId ? { ...item, active: false } : item
-    );
+    products = products.filter((item) => item.id !== productId);
 
     render();
-    showToast(`${product.nome} excluído do cardápio com sucesso.`);
+    showToast("Produto excluído com sucesso.");
   } catch (error) {
     console.error("Erro ao excluir produto:", error);
-    showToast("Ocorreu um erro. Tente novamente.");
+    showToast("Não foi possível excluir. Tente novamente.");
   }
 }
 
@@ -3239,60 +3285,73 @@ function handleTableFlowTableChange(select) {
   render();
 }
 
+window.handleTableFlowClientChange = handleTableFlowClientChange;
+window.handleTableFlowTableChange = handleTableFlowTableChange;
+
 async function tableFlowLancar() {
   const flow = state.staffTableFlow;
+
   if (!flow.items.length) {
     showToast("Adicione ao menos um item.");
     return;
   }
-  const mesa = flow.table || "Balcão";
-  const payload = {
-    mesa,
-    items: flow.items.map((item) => ({
-      product_id: item.product_id || item.productId || "",
-      nome: item.nome,
-      option: item.option || "",
-      quantity: Number(item.quantity || 1),
-      unit_price: Number(item.unit_price || item.preco || 0),
-      notes: item.notes || ""
-    }))
-  };
 
-  if (flow.orderId && /^\d+$/.test(String(flow.orderId))) {
-    const data = await apiRequest(`/api/orders/${flow.orderId}/items`, {
-      method: "PATCH",
-      body: JSON.stringify({ items: payload.items })
-    });
-    if (data?.order) await syncOrders();
-  } else {
-    const data = await apiRequest("/api/orders", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    if (data?.order) {
-      state.staffTableFlow.orderId = data.order.id;
-      await syncOrders();
+  const selectedClient = state.staffClients.find(
+    (_, index) => String(index) === String(flow.selectedClientId)
+  );
+
+  const mesa = flow.table || "";
+  const { subtotal, service, total } = tableFlowTotals();
+
+  const items = flow.items.map((item) => ({
+    product_id: item.product_id || item.productId || "",
+    productId: item.product_id || item.productId || "",
+    nome: item.nome,
+    option: item.option || "",
+    quantity: Number(item.quantity || 1),
+    unit_price: Number(item.unit_price || item.preco || 0),
+    preco: Number(item.unit_price || item.preco || 0),
+    notes: item.notes || ""
+  }));
+
+  try {
+    if (flow.orderId) {
+      await updateOrderItems(
+        flow.orderId,
+        items,
+        subtotal,
+        service,
+        total
+      );
     } else {
-      const localId = `local-${Date.now()}`;
-      state.staffTableFlow.orderId = localId;
-      state.staffOrders = [
-        {
-          id: localId,
-          mesa,
-          itens: flow.items.map((i) => `${i.nome} x ${i.quantity}`).join(", "),
-          hora: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-          status: "Novo",
-          items: flow.items.map((i) => ({ ...i })),
-          total: tableFlowTotals().total
-        },
-        ...state.staffOrders
-      ];
-    }
-  }
+      const savedOrder = await createOrder({
+        mesa,
+        status: "Novo",
+        hora: new Date().toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit"
+        }),
+        subtotal,
+        service,
+        total,
+        notes: "",
+        payment: "",
+        client: selectedClient?.id || selectedClient?.nome || null,
+        items
+      });
 
-  showToast("Itens lançados com sucesso!");
-  state.staffTableFlow.tab = "pagamento";
-  render();
+      state.staffTableFlow.orderId = savedOrder.id;
+    }
+
+    await syncOrders();
+
+    showToast("Pedido lançado com sucesso.");
+    state.staffTableFlow.tab = "pagamento";
+    render();
+  } catch (error) {
+    console.error("Erro ao lançar pedido:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function tableFlowConfirmPayment() {
