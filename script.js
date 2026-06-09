@@ -7,6 +7,13 @@ import {
   deleteTable,
   saveProduct,
   deleteProduct,
+  createClient as createBrewersClient,
+  deleteClient,
+  openCash,
+  closeCash,
+  createOrder,
+  updateOrderStatus,
+  updateOrderItems,
   uploadProductImage,
   listenOrders
 } from "./supabase-service.js";
@@ -2163,7 +2170,7 @@ document.addEventListener("click", (event) => {
       const order = selectedStaffOrder();
       if (order) order.paymentMethod = paymentMethod;
       state.staffModal = null;
-      showToast("Pagamento confirmado");
+      showToast("Pagamento confirmado com sucesso.");
     }
   };
 
@@ -2286,59 +2293,80 @@ async function enterStaffPanel() {
 }
 
 async function advanceOrder(orderId) {
-  const order = state.staffOrders.find((item) => item.id === orderId);
-  if (!order) return;
-  const nextIndex = Math.min(orderStatusFlow.indexOf(order.status) + 1, orderStatusFlow.length - 1);
-  const nextStatus = orderStatusFlow[nextIndex];
+  const order = state.staffOrders.find((item) => String(item.id) === String(orderId));
 
-  if (/^\d+$/.test(orderId)) {
-    const data = await apiRequest(`/api/orders/${orderId}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: nextStatus })
-    });
-    if (data?.order) {
-      await syncOrders();
-      render();
-      return;
-    }
+  if (!order) {
+    return;
   }
 
-  order.status = nextStatus;
-  render();
+  const currentIndex = orderStatusFlow.indexOf(order.status);
+  const nextIndex = Math.min(currentIndex + 1, orderStatusFlow.length - 1);
+  const nextStatus = orderStatusFlow[nextIndex];
+
+  if (order.status === nextStatus) {
+    return;
+  }
+
+  try {
+    await updateOrderStatus(orderId, nextStatus);
+
+    order.status = nextStatus;
+
+    await syncOrders();
+
+    render();
+    showToast(`Pedido atualizado para: ${nextStatus}.`);
+  } catch (error) {
+    console.error("Erro ao avançar status:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function saveStaffOrderItems() {
   const order = selectedStaffOrder();
-  if (!order) return;
+
+  if (!order) {
+    return;
+  }
+
   if (!order.items?.length) {
     showToast("O pedido precisa ter pelo menos um item.");
     return;
   }
 
-  if (/^\d+$/.test(String(order.id))) {
-    const data = await apiRequest(`/api/orders/${order.id}/items`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        items: order.items.map((item) => ({
-          product_id: item.product_id || item.productId || "",
-          nome: item.nome,
-          option: item.option || "",
-          quantity: Number(item.quantity || 1),
-          unit_price: Number(item.unit_price || item.preco || 0),
-          notes: item.notes || ""
-        }))
-      })
-    });
+  recalculateStaffOrder(order);
 
-    if (data?.order) {
-      await syncOrders();
-    }
+  const items = order.items.map((item) => ({
+    product_id: item.product_id || item.productId || "",
+    productId: item.product_id || item.productId || "",
+    nome: item.nome,
+    option: item.option || "",
+    quantity: Number(item.quantity || 1),
+    unit_price: Number(item.unit_price || item.unitPrice || item.preco || 0),
+    preco: Number(item.unit_price || item.unitPrice || item.preco || 0),
+    notes: item.notes || ""
+  }));
+
+  try {
+    await updateOrderItems(
+      order.id,
+      items,
+      order.subtotal,
+      order.service,
+      order.total
+    );
+
+    await syncOrders();
+
+    state.staffOrderSnapshot = null;
+    state.staffModal = null;
+
+    render();
+    showToast("Pedido atualizado com sucesso.");
+  } catch (error) {
+    console.error("Erro ao salvar itens do pedido:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
   }
-
-  state.staffOrderSnapshot = null;
-  state.staffModal = null;
-  render();
-  showToast("Pedido atualizado.");
 }
 
 function parseMoneyInput(value) {
@@ -2384,62 +2412,88 @@ function localOrderFromCart(cartItems) {
 
 async function finalizeOrder() {
   if (!state.cart.length) return;
+
   const cartItems = state.cart.map((item) => ({ ...item }));
-  const payload = {
+
+  const values = totals();
+
+
+  const order = {
+    id: `order-${Date.now()}`,
     mesa: state.currentTable,
+    status: "Novo",
+    hora: new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    }),
+    subtotal: values.subtotal,
+    service: values.service,
+    total: values.total,
+    notes: "",
+    payment: "",
+    client: null,
     items: cartItems.map((item) => ({
       product_id: item.productId,
+      productId: item.productId,
       nome: item.nome,
-      option: item.option,
-      quantity: item.quantity,
-      unit_price: item.preco,
+      option: item.option || "",
+      quantity: Number(item.quantity || 1),
+      unit_price: Number(item.preco || 0),
+      preco: Number(item.preco || 0),
       notes: item.notes || ""
     }))
-  };
+};
 
-  const data = await apiRequest("/api/orders", {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
+  try {
+    const savedOrder = await createOrder(order);
 
-  if (data?.order) {
-    state.lastOrderNumber = data.order.id;
+    state.lastOrderNumber = String(savedOrder?.numero || "").padStart(2, "0");;
+
     await syncOrders();
-  } else {
-    const localOrder = localOrderFromCart(cartItems);
-    state.lastOrderNumber = localOrder.id.replace("local-", "");
-    state.staffOrders = [localOrder, ...state.staffOrders];
-  }
 
-  state.cart = [];
-  state.view = "success";
-  render();
+    state.cart = [];
+    state.view = "success";
+
+    render();
+  } catch (error) {
+    console.error("Erro ao finalizar pedido:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function saveCashOpen() {
   const input = document.querySelector(".staff-dialog .staff-money-input") || document.querySelector(".staff-dialog input");
   const balance = parseMoneyInput(input?.value);
-  const data = await apiRequest("/api/cash/open", {
-    method: "POST",
-    body: JSON.stringify({ balance })
-  });
 
-  state.cashOpen = data ? Boolean(data.is_open) : true;
-  state.staffModal = null;
-  state.staffView = "overview";
-  render();
+  try {
+    const cash = await openCash(balance);
+
+    state.cashOpen = Boolean(cash?.is_open ?? true);
+    state.staffModal = null;
+    state.staffView = "overview";
+
+    render();
+    showToast("Caixa aberto com sucesso.");
+  } catch (error) {
+    console.error("Erro ao abrir caixa:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function saveCashClose() {
-  const data = await apiRequest("/api/cash/close", {
-    method: "POST",
-    body: JSON.stringify({})
-  });
+  try {
+    const cash = await closeCash();
 
-  state.cashOpen = data ? Boolean(data.is_open) : false;
-  state.staffModal = null;
-  state.staffView = "overview";
-  render();
+    state.cashOpen = Boolean(cash?.is_open ?? false);
+    state.staffModal = null;
+    state.staffView = "overview";
+
+    render();
+    showToast("Caixa fechado com sucesso.");
+  } catch (error) {
+    console.error("Erro ao fechar caixa:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function saveProductFromModal(target) {
@@ -2508,35 +2562,47 @@ async function saveProductFromModal(target) {
 
     state.staffModal = null;
     render();
-    showToast(`${nome} cadastrado no Supabase.`);
+    showToast(`${nome} cadastrado com sucesso.`);
   } catch (error) {
     console.error("Erro ao salvar produto:", error);
-    showToast("Erro ao salvar produto. Veja o console.");
+    showToast("Ocorreu um erro. Tente novamente.");
   }
 }
 
 async function saveClientFromModal(target) {
   const dialog = target.closest(".staff-dialog");
+
   const nome = dialog.querySelector("[name='clientName']")?.value.trim();
+
   if (!nome) {
     showToast("Informe o nome do cliente.");
     return;
   }
+
   const client = {
     nome,
-    cpf: formatCpfDisplay(dialog.querySelector("[name='clientCpf']")?.value || ""),
-    celular: formatPhoneInput(dialog.querySelector("[name='clientPhone']")?.value || ""),
-    nascimento: formatBirthDateInput(dialog.querySelector("[name='clientBirth']")?.value || ""),
+    cpf: dialog.querySelector("[name='clientCpf']")?.value.trim() || "",
+    celular: dialog.querySelector("[name='clientPhone']")?.value.trim() || "",
+    nascimento: dialog.querySelector("[name='clientBirth']")?.value.trim() || "",
     endereco: dialog.querySelector("[name='clientAddress']")?.value.trim() || ""
   };
 
-  const data = await apiRequest("/api/clients", {
-    method: "POST",
-    body: JSON.stringify(client)
-  });
-  state.staffClients = [data?.client || client, ...state.staffClients];
-  state.staffModal = null;
-  render();
+  try {
+    const savedClient = await createBrewersClient(client);
+
+    state.staffClients = [
+      savedClient,
+      ...state.staffClients.filter((item) => item.id !== savedClient.id)
+    ];
+
+    state.staffModal = null;
+    render();
+
+    showToast(`${savedClient.nome} cadastrado com sucesso.`);
+  } catch (error) {
+    console.error("Erro ao cadastrar cliente:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function saveNewTableFromModal(target) {
@@ -2562,7 +2628,7 @@ staffTables.sort((a, b) => {
 saveStaffTables();
 state.staffModal = "tables";
 render();
-showToast(`${tableName} cadastrada.`);
+showToast(`${tableName} cadastrada com sucesso.`);
 }
 
 function updateReportDatesFromInputs() {
@@ -2598,23 +2664,36 @@ async function deleteTableFromSettings(tableName) {
     state.staffModal = "tables";
     render();
 
-    showToast(`${tableName} excluída do Supabase.`);
+    showToast(`${tableName} excluída com sucesso.`);
   } catch (error) {
     console.error("Erro ao excluir mesa:", error);
-    showToast("Erro ao excluir mesa. Veja o console.");
+    showToast("Ocorreu um erro. Tente novamente.");
   }
 }
 
-async function deleteClientFromTable(clientId, clientIndex) {
+async function deleteClientFromTable(clientIndex, clientId) {
   const index = Number(clientIndex);
-  if (clientId) {
-    await apiRequest(`/api/clients/${clientId}`, { method: "DELETE" });
+  const client = state.staffClients[index];
+
+  if (!client) {
+    return;
   }
-  state.staffClients = state.staffClients.filter((client, idx) => {
-    if (clientId) return String(client.id) !== String(clientId);
-    return idx !== index;
-  });
-  render();
+
+  const id = clientId || client.id;
+
+  try {
+    if (id) {
+      await deleteClient(id);
+    }
+
+    state.staffClients = state.staffClients.filter((_, itemIndex) => itemIndex !== index);
+
+    render();
+    showToast(`${client.nome} excluído com sucesso.`);
+  } catch (error) {
+    console.error("Erro ao excluir cliente:", error);
+    showToast("Ocorreu um erro. Tente novamente.");
+  }
 }
 
 async function toggleProductActive(productId) {
@@ -2639,10 +2718,10 @@ async function toggleProductActive(productId) {
     );
 
     render();
-    showToast(`${product.nome} ${nextActive ? "ativado" : "desativado"}.`);
+    showToast(`${product.nome} ${nextActive ? "ativado" : "desativado"} com sucesso.`);
   } catch (error) {
     console.error("Erro ao alterar produto:", error);
-    showToast("Erro ao alterar produto. Veja o console.");
+    showToast("Ocorreu um erro. Tente novamente.");
   }
 }
 
@@ -2661,10 +2740,10 @@ async function deleteProductFromMenu(productId) {
     );
 
     render();
-    showToast(`${product.nome} excluído do cardápio.`);
+    showToast(`${product.nome} excluído do cardápio com sucesso.`);
   } catch (error) {
     console.error("Erro ao excluir produto:", error);
-    showToast("Erro ao excluir produto. Veja o console.");
+    showToast("Ocorreu um erro. Tente novamente.");
   }
 }
 
@@ -2684,7 +2763,7 @@ async function confirmPendingDelete() {
 
   state.pendingDelete = null;
   if (request.type === "client") {
-    await deleteClientFromTable(request.clientId, request.clientIndex);
+    await deleteClientFromTable(request.clientIndex, request.clientId);
     return;
   }
   if (request.type === "product") {

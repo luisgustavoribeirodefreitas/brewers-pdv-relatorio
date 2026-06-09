@@ -273,6 +273,7 @@ export async function closeCash() {
 function normalizeOrder(order, items = []) {
   return {
     id: order.id,
+    numero: order.numero,
     mesa: order.mesa,
     table: order.mesa,
     status: order.status,
