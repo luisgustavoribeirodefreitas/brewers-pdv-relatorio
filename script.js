@@ -353,6 +353,17 @@ const state = {
   staffOrderSnapshot: null,
   staffView: "overview",
   staffModal: null,
+  staffTableFlow: {
+    active: false,
+    isNew: false,
+    table: null,
+    tab: "cliente",
+    selectedClientId: null,
+    orderId: null,
+    items: [],
+    paymentMethod: "Pix",
+    category: "Bebidas Quentes"
+  },
   staffLoginMode: "login",
   staffLoginError: "",
   staffLoginDraft: {
@@ -964,8 +975,8 @@ function renderStaffSidebar() {
       <nav class="staff-nav" aria-label="Navegação do painel">
         ${staffNav.map((item) => `
           <button class="staff-nav-item ${state.staffView === item.id ? "is-active" : ""}" data-action="staff-nav" data-staff-view="${item.id}">
-            <span class="staff-nav-icon staff-nav-icon-${item.icon}" aria-hidden="true">
-              <img src="${item.asset}" alt="" onload="this.parentElement.classList.add('has-asset')" onerror="this.remove()">
+            <span class="staff-nav-icon staff-nav-icon-${item.icon} has-asset" aria-hidden="true">
+              <img src="${item.asset}" alt="" loading="eager" decoding="sync" onerror="this.parentElement.classList.remove('has-asset'); this.remove()">
             </span>${item.label}
           </button>
         `).join("")}
@@ -986,6 +997,7 @@ function renderStaffSidebar() {
 }
 
 function renderStaffContent() {
+  if (state.staffTableFlow.active) return renderStaffTableFlow();
   const content = {
     overview: renderStaffOverview,
     orders: renderStaffTables,
@@ -1081,14 +1093,22 @@ function statusClass(status) {
 }
 
 function renderStaffTables() {
+  const tablesWithOrders = new Set(
+    state.staffOrders
+      .filter((o) => o.status !== "Entregue")
+      .map((o) => o.mesa)
+  );
   return `
-    ${renderStaffHeader("Mesas", "", `<button class="staff-primary small" data-action="new-order">Novo Pedido</button>`)}
+    ${renderStaffHeader("Mesas", "", `<button class="staff-primary small" data-action="new-order">+ Novo Pedido</button>`)}
     <section class="tables-grid">
-      ${staffTables.map((table) => `
-        <button class="table-card" data-action="staff-table-detail" data-table="${table}">
-          <span>${table}</span>
-        </button>
-      `).join("")}
+      ${staffTables.map((table) => {
+        const hasOrder = tablesWithOrders.has(table);
+        return `
+          <button class="table-card ${hasOrder ? "" : "table-card--empty"}" data-action="staff-table-detail" data-table="${table}">
+            <span>${table}</span>
+          </button>
+        `;
+      }).join("")}
     </section>
   `;
 }
@@ -1510,7 +1530,7 @@ document.addEventListener("click", (event) => {
   const reason = target.dataset.reason;
   const staffView = target.dataset.staffView;
 
-  if (category) {
+  if (category && !action) {
     state.category = category;
     setView("menu");
     return;
@@ -1521,6 +1541,8 @@ document.addEventListener("click", (event) => {
       state.staffModal = "cash-warning";
     } else {
       state.staffView = staffView;
+      // Exit table flow when navigating away via sidebar
+      state.staffTableFlow = { active: false, isNew: false, table: null, tab: "cliente", selectedClientId: null, orderId: null, items: [], paymentMethod: "Pix", category: "Bebidas Quentes" };
     }
     render();
     return;
@@ -1661,13 +1683,110 @@ document.addEventListener("click", (event) => {
     "staff-order-item-remove": () => removeStaffOrderItem(target.dataset.orderId, target.dataset.itemKey),
     "save-order-items": () => saveStaffOrderItems(),
     "staff-table-detail": () => {
-      state.staffModal = "table-detail";
+      const table = target.dataset.table;
+      const existingOrder = state.staffOrders.find(
+        (o) => o.mesa === table && o.status !== "Entregue"
+      );
+      state.staffTableFlow = {
+        active: true,
+        isNew: false,
+        table,
+        tab: "cliente",
+        selectedClientId: null,
+        orderId: existingOrder ? existingOrder.id : null,
+        items: existingOrder
+          ? (existingOrder.items || []).map((item) => ({ ...item }))
+          : [],
+        paymentMethod: "Pix",
+        category: "Bebidas Quentes"
+      };
       render();
     },
     "new-order": () => {
-      state.staffModal = "table-detail";
+      state.staffTableFlow = {
+        active: true,
+        isNew: true,
+        table: null,
+        tab: "cliente",
+        selectedClientId: null,
+        orderId: null,
+        items: [],
+        paymentMethod: "Pix",
+        category: "Bebidas Quentes"
+      };
       render();
     },
+    "table-flow-back": () => {
+      state.staffTableFlow = { active: false, isNew: false, table: null, tab: "cliente", selectedClientId: null, orderId: null, items: [], paymentMethod: "Pix", category: "Bebidas Quentes" };
+      render();
+    },
+    "table-flow-tab": () => {
+      state.staffTableFlow.tab = target.dataset.tab;
+      render();
+    },
+    "table-flow-select-table": () => {
+      state.staffTableFlow.table = target.dataset.table || null;
+      render();
+    },
+    "table-flow-select-client": () => {
+      const val = target.dataset.clientId;
+      state.staffTableFlow.selectedClientId = val === "" ? null : val;
+      render();
+    },
+    "table-flow-category": () => {
+      state.staffTableFlow.category = target.dataset.category;
+      render();
+    },
+    "table-flow-add-product": () => {
+      const productId = target.dataset.product;
+      const product = productById(productId);
+      if (!product) return;
+      const existing = state.staffTableFlow.items.find(
+        (item) => (item.product_id || item.productId) === productId
+      );
+      if (existing) {
+        existing.quantity = (existing.quantity || 1) + 1;
+      } else {
+        state.staffTableFlow.items.push({
+          uid: `${productId}-${Date.now()}`,
+          product_id: productId,
+          productId,
+          nome: product.nome,
+          option: product.opcoes[0] || "",
+          quantity: 1,
+          unit_price: product.preco,
+          preco: product.preco,
+          notes: ""
+        });
+      }
+      render();
+    },
+    "table-flow-item-increase": () => {
+      const uid = target.dataset.uid;
+      const item = state.staffTableFlow.items.find((i) => (i.uid || i.id) === uid);
+      if (item) { item.quantity = (item.quantity || 1) + 1; render(); }
+    },
+    "table-flow-item-decrease": () => {
+      const uid = target.dataset.uid;
+      const idx = state.staffTableFlow.items.findIndex((i) => (i.uid || i.id) === uid);
+      if (idx < 0) return;
+      const item = state.staffTableFlow.items[idx];
+      item.quantity = (item.quantity || 1) - 1;
+      if (item.quantity <= 0) state.staffTableFlow.items.splice(idx, 1);
+      render();
+    },
+    "table-flow-item-remove": () => {
+      const uid = target.dataset.uid;
+      state.staffTableFlow.items = state.staffTableFlow.items.filter((i) => (i.uid || i.id) !== uid);
+      render();
+    },
+    "table-flow-payment-method": () => {
+      state.staffTableFlow.paymentMethod = target.dataset.method;
+      render();
+    },
+    "table-flow-lancar": () => tableFlowLancar(),
+    "table-flow-confirm-payment": () => tableFlowConfirmPayment(),
+    "table-flow-print": () => showToast("Conta enviada para impressão"),
     "generate-report": () => showToast("Relatório gerado"),
     "show-toast": () => showToast(target.dataset.message || "Ação realizada"),
     "confirm-payment": () => {
@@ -2082,6 +2201,387 @@ function showToast(message) {
     state.toast = "";
     renderModal();
   }, 2200);
+}
+
+/* ─── TABLE ORDER FLOW ─────────────────────────────────────────────────── */
+
+function tableFlowTotals() {
+  const items = state.staffTableFlow.items || [];
+  const subtotal = items.reduce(
+    (sum, item) => sum + Number(item.unit_price || item.preco || 0) * Number(item.quantity || 0),
+    0
+  );
+  const service = subtotal * 0.1;
+  return { subtotal, service, total: subtotal + service };
+}
+
+function renderStaffTableFlow() {
+  const flow = state.staffTableFlow;
+  const tableLabel = flow.table || (flow.isNew ? "Novo Pedido" : "Mesa");
+  const tabs = [
+    { id: "cliente", label: "Cliente" },
+    { id: "pedido", label: "Pedido" },
+    { id: "pagamento", label: "Pagamento" }
+  ];
+
+  const tabContent = {
+    cliente: renderFlowClienteTab,
+    pedido: renderFlowPedidoTab,
+    pagamento: renderFlowPagamentoTab
+  };
+
+  return `
+    <div class="table-flow">
+      <header class="staff-topbar table-flow-topbar">
+        <div class="table-flow-header-left">
+          <button class="table-flow-back-btn" data-action="table-flow-back" aria-label="Voltar">←</button>
+          <h2>${tableLabel}</h2>
+        </div>
+      </header>
+      <div class="table-flow-tabs-wrap">
+        <nav class="table-flow-tabs" aria-label="Etapas do pedido">
+          ${tabs.map((t) => `
+            <button class="table-flow-tab ${flow.tab === t.id ? "is-active" : ""}"
+                    data-action="table-flow-tab" data-tab="${t.id}">
+              ${t.label}
+            </button>
+          `).join("")}
+        </nav>
+      </div>
+      <div class="table-flow-content">
+        ${(tabContent[flow.tab] || renderFlowClienteTab)()}
+      </div>
+    </div>
+  `;
+}
+
+function renderFlowClienteTab() {
+  const flow = state.staffTableFlow;
+  const clients = state.staffClients;
+  const selectedClient = clients.find(
+    (c, i) => String(i) === String(flow.selectedClientId)
+  );
+
+  const tableSelector = flow.isNew
+    ? `
+      <div class="cliente-form-group" style="margin-bottom:24px">
+        <label class="cliente-form-label">Mesa:</label>
+        <select class="cliente-select" onchange="handleTableFlowTableChange(this)">
+          <option value="">— Sem mesa —</option>
+          ${staffTables.map((t) => `<option value="${t}" ${flow.table === t ? "selected" : ""}>${t}</option>`).join("")}
+        </select>
+      </div>
+    `
+    : "";
+
+  const clientInfo = selectedClient
+    ? renderClientInsights(selectedClient, flow)
+    : `
+      <div class="cliente-info-card">
+        <p class="cliente-info-title">ℹ Dados sobre o Pedido e Cliente</p>
+        <ul class="cliente-info-list">
+          <li>Comanda aberta às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.</li>
+          <li>Selecione um cliente para ver insights.</li>
+        </ul>
+      </div>
+    `;
+
+  return `
+    <div class="cliente-tab-layout">
+      <div class="cliente-form">
+        ${tableSelector}
+        <div class="cliente-form-group">
+          <label class="cliente-form-label" for="flow-client-select">Nome do cliente:</label>
+          <select id="flow-client-select" class="cliente-select" onchange="handleTableFlowClientChange(this)">
+            <option value="">— Sem cliente —</option>
+            ${clients.map((c, i) => `
+              <option value="${i}" ${String(i) === String(flow.selectedClientId) ? "selected" : ""}>${c.nome}</option>
+            `).join("")}
+          </select>
+        </div>
+      </div>
+      ${clientInfo}
+    </div>
+  `;
+}
+
+function renderClientInsights(client, flow) {
+  const items = flow.items || [];
+  const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const insights = [
+    `Comanda aberta às ${hora}.`,
+    `Itens no pedido atual: ${items.length}.`,
+    `Cliente: ${client.nome}.`,
+    client.celular ? `Celular: ${client.celular}.` : null,
+    client.nascimento ? `Nascimento: ${client.nascimento}.` : null,
+    client.cpf ? `CPF: ${client.cpf}.` : null
+  ].filter(Boolean);
+
+  return `
+    <div class="cliente-info-card">
+      <p class="cliente-info-title">ℹ Dados sobre o Pedido e Cliente</p>
+      <ul class="cliente-info-list">
+        ${insights.map((text) => `<li>${text}</li>`).join("")}
+      </ul>
+    </div>
+  `;
+}
+
+function renderFlowPedidoTab() {
+  const flow = state.staffTableFlow;
+  const currentCat = flow.category;
+  const catProducts = productsByCategory(currentCat);
+  const items = flow.items || [];
+  const { total } = tableFlowTotals();
+
+  return `
+    <div class="pedido-tab-layout">
+      <div class="pedido-menu-area">
+        <nav class="pedido-category-tabs">
+          ${categories.map((cat) => `
+            <button class="pedido-category-tab ${cat === currentCat ? "is-active" : ""}"
+                    data-action="table-flow-category" data-category="${cat}">
+              ${cat}
+            </button>
+          `).join("")}
+        </nav>
+        <div class="pedido-product-grid">
+          ${catProducts.map((product) => `
+            <button class="pedido-product-btn"
+                    data-action="table-flow-add-product" data-product="${product.id}">
+              <strong>${product.nome}</strong>
+              <span>${money(product.preco)}</span>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+      <aside class="pedido-order-panel">
+        <div class="pedido-order-header">Itens lançados</div>
+        <div class="pedido-order-list">
+          ${items.length
+            ? items.map((item) => {
+                const uid = item.uid || item.id || item.productId;
+                const unitPrice = Number(item.unit_price || item.preco || 0);
+                return `
+                  <article class="pedido-order-item">
+                    <span class="qty">${item.quantity}x</span>
+                    <span class="nome">${item.nome}</span>
+                    <span class="price">${money(unitPrice * item.quantity)}</span>
+                    <div class="pedido-item-controls">
+                      <button class="pedido-qty-btn" data-action="table-flow-item-decrease" data-uid="${uid}" aria-label="Diminuir">−</button>
+                      <button class="pedido-qty-btn plus" data-action="table-flow-item-increase" data-uid="${uid}" aria-label="Aumentar">+</button>
+                      <button class="pedido-remove-btn" data-action="table-flow-item-remove" data-uid="${uid}" aria-label="Remover">✕</button>
+                    </div>
+                  </article>
+                `;
+              }).join("")
+            : `<p class="pedido-order-empty">Nenhum item adicionado.</p>`
+          }
+        </div>
+        <div class="pedido-order-total">
+          <span>Total do consumo</span>
+          <strong>${money(total)}</strong>
+        </div>
+        <button class="pedido-lancar-btn" data-action="table-flow-lancar"
+                ${items.length ? "" : "disabled"}>
+          Lançar
+        </button>
+      </aside>
+    </div>
+  `;
+}
+
+function renderFlowPagamentoTab() {
+  const flow = state.staffTableFlow;
+  const items = flow.items || [];
+  const { subtotal, service, total } = tableFlowTotals();
+  const method = flow.paymentMethod;
+
+  const pixBox = method === "Pix" ? `
+    <div class="pagamento-pix-box">
+      <div class="pagamento-pix-qr">${renderPixQrSvg()}</div>
+      <div class="pagamento-pix-info">
+        <span>Chave Pix:</span>
+        <strong>brewers@cafe.com</strong>
+        <span>Valor:</span>
+        <strong class="pix-valor">${money(total)}</strong>
+      </div>
+    </div>
+  ` : "";
+
+  return `
+    <div class="pagamento-tab-layout">
+      <div class="pagamento-items-area">
+        <h3 class="pagamento-items-title">Lista de itens consumidos</h3>
+        ${items.map((item) => {
+          const unitPrice = Number(item.unit_price || item.preco || 0);
+          return `
+            <div class="pagamento-item-row">
+              <span class="pagamento-item-qty">${item.quantity}x</span>
+              <span>${item.nome}</span>
+              <span class="pagamento-item-price">${money(unitPrice * item.quantity)}</span>
+            </div>
+          `;
+        }).join("") || `<p style="color:var(--color-muted);font-size:14px">Nenhum item lançado.</p>`}
+      </div>
+
+      <div class="pagamento-summary-area">
+        <h3 class="pagamento-summary-title">Resumo do Pagamento</h3>
+        <div class="pagamento-summary-rows">
+          <div class="pagamento-summary-row"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+          <div class="pagamento-summary-row"><span>Taxa serviço (10%)</span><span>${money(service)}</span></div>
+          <div class="pagamento-summary-row"><span>Desconto</span><span style="color:var(--color-success)">- ${money(0)}</span></div>
+          <div class="pagamento-summary-row total"><span>TOTAL</span><strong>${money(total)}</strong></div>
+        </div>
+
+        <p class="pagamento-method-label">Forma de Pagamento</p>
+        <div class="pagamento-methods">
+          ${["Cartão", "Dinheiro", "Pix"].map((m) => `
+            <button class="pagamento-method-btn ${method === m ? "is-active" : ""}"
+                    data-action="table-flow-payment-method" data-method="${m}">
+              ${m === "Cartão" ? "💳 " : m === "Dinheiro" ? "💵 " : "📱 "}${m}
+            </button>
+          `).join("")}
+        </div>
+        ${pixBox}
+        <div class="pagamento-actions">
+          <button class="pagamento-confirm-btn" data-action="table-flow-confirm-payment"
+                  ${items.length ? "" : "disabled"}>
+            ✓ Confirmar Pagamento
+          </button>
+          <button class="pagamento-print-btn" data-action="table-flow-print">
+            Imprimir Conta
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPixQrSvg() {
+  // Simple fake QR code SVG for prototype
+  const size = 80;
+  const cell = 8;
+  const pattern = [
+    [1,1,1,1,1,1,1,0,1,0],
+    [1,0,0,0,0,0,1,0,0,1],
+    [1,0,1,1,1,0,1,0,1,0],
+    [1,0,1,1,1,0,1,0,0,1],
+    [1,0,1,1,1,0,1,1,1,0],
+    [1,0,0,0,0,0,1,0,1,1],
+    [1,1,1,1,1,1,1,0,0,0],
+    [0,0,0,0,0,0,0,1,0,1],
+    [1,0,1,1,0,1,1,0,1,0],
+    [0,1,0,0,1,0,0,1,0,1]
+  ];
+  const rects = pattern.flatMap((row, r) =>
+    row.map((cell, c) => cell
+      ? `<rect x="${c * 8}" y="${r * 8}" width="8" height="8" fill="#000"/>`
+      : "")
+  ).join("");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
+}
+
+// Change handlers wired via onchange (bypasses dataset-only approach)
+function handleTableFlowClientChange(select) {
+  state.staffTableFlow.selectedClientId = select.value === "" ? null : select.value;
+  render();
+}
+function handleTableFlowTableChange(select) {
+  state.staffTableFlow.table = select.value || null;
+  render();
+}
+
+async function tableFlowLancar() {
+  const flow = state.staffTableFlow;
+  if (!flow.items.length) {
+    showToast("Adicione ao menos um item.");
+    return;
+  }
+  const mesa = flow.table || "Balcão";
+  const payload = {
+    mesa,
+    items: flow.items.map((item) => ({
+      product_id: item.product_id || item.productId || "",
+      nome: item.nome,
+      option: item.option || "",
+      quantity: Number(item.quantity || 1),
+      unit_price: Number(item.unit_price || item.preco || 0),
+      notes: item.notes || ""
+    }))
+  };
+
+  if (flow.orderId && /^\d+$/.test(String(flow.orderId))) {
+    const data = await apiRequest(`/api/orders/${flow.orderId}/items`, {
+      method: "PATCH",
+      body: JSON.stringify({ items: payload.items })
+    });
+    if (data?.order) await syncOrders();
+  } else {
+    const data = await apiRequest("/api/orders", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    if (data?.order) {
+      state.staffTableFlow.orderId = data.order.id;
+      await syncOrders();
+    } else {
+      const localId = `local-${Date.now()}`;
+      state.staffTableFlow.orderId = localId;
+      state.staffOrders = [
+        {
+          id: localId,
+          mesa,
+          itens: flow.items.map((i) => `${i.nome} x ${i.quantity}`).join(", "),
+          hora: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+          status: "Novo",
+          items: flow.items.map((i) => ({ ...i })),
+          total: tableFlowTotals().total
+        },
+        ...state.staffOrders
+      ];
+    }
+  }
+
+  showToast("Itens lançados com sucesso!");
+  state.staffTableFlow.tab = "pagamento";
+  render();
+}
+
+async function tableFlowConfirmPayment() {
+  const flow = state.staffTableFlow;
+  const { total } = tableFlowTotals();
+  const orderId = flow.orderId;
+
+  if (orderId && /^\d+$/.test(String(orderId))) {
+    await apiRequest(`/api/orders/${orderId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "Entregue" })
+    });
+    await syncOrders();
+  } else if (orderId) {
+    const localOrder = state.staffOrders.find((o) => o.id === orderId);
+    if (localOrder) {
+      localOrder.status = "Entregue";
+      localOrder.paymentMethod = flow.paymentMethod;
+      localOrder.total = total;
+    }
+  }
+
+  showToast(`Pagamento via ${flow.paymentMethod} confirmado! ${money(total)}`);
+  state.staffTableFlow = {
+    active: false,
+    isNew: false,
+    table: null,
+    tab: "cliente",
+    selectedClientId: null,
+    orderId: null,
+    items: [],
+    paymentMethod: "Pix",
+    category: "Bebidas Quentes"
+  };
+  state.staffView = "orders";
+  render();
 }
 
 render();
