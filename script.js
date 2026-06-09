@@ -472,6 +472,7 @@ const state = {
   cashOpen: false,
   toast: "",
   staffOrders: [],
+  ordersLoaded: false,
   staffClients: [
     { nome: "Luis Gustavo Freitas", cpf: "123.xxx.xxx-52", celular: "(43) 9 1644-4645", nascimento: "13/03/2007", endereco: "R. Marialvence, 140, Maringa, Parana" },
     { nome: "Maria Lucia Gonzaga", cpf: "158.xxx.xxx-90", celular: "(44) 9 5516-6358", nascimento: "25/12/1996", endereco: "R. Mario e Luigi, 6, Maringa, Parana" }
@@ -684,6 +685,7 @@ async function syncProducts() {
 function syncOrders() {
   return listenOrders((firebaseOrders) => {
     state.staffOrders = firebaseOrders.map(orderFromApi);
+    state.ordersLoaded = true;
 
     const currentTableIsOccupied = occupiedStaffTables().has(
       normalizePlainText(state.currentTable)
@@ -832,13 +834,16 @@ function render() {
 }
 
 function renderWelcome() {
+  const tableLabel = state.currentTable
+    || (state.ordersLoaded ? "Sem mesas disponíveis" : "Carregando mesa...");
+
   return `
     <section class="screen welcome-screen" data-screen="1 — Boas-vindas">
       <div class="welcome-card">
         <div class="logo-mark" aria-hidden="true"><img src="assets/logo-brewers.svg" alt=""></div>
         <h1 class="welcome-title">BREWERS</h1>
         <div class="welcome-line"></div>
-        <p class="welcome-table">${state.currentTable || "Carregando mesa..."}</p>
+        <p class="welcome-table">${tableLabel}</p>
         <button class="primary-button" data-action="start" ${state.currentTable ? "" : "disabled"}>Toque para iniciar</button>
         <button class="staff-link" data-action="staff-login">Área do atendente</button>
       </div>
