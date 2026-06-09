@@ -16,7 +16,9 @@ import {
   updateOrder,
   updateOrderItems,
   uploadProductImage,
-  listenOrders
+  listenOrders,
+  loginStaffUserSupabase,
+  registerStaffUserSupabase
 } from "./supabase-service.js";
 
 const categories = ["Bebidas Quentes", "Bebidas Geladas", "Salgados", "Doces"];
@@ -2400,6 +2402,7 @@ async function loginStaffUser(form) {
   const data = new FormData(form);
   const username = normalizeStaffUsername(data.get("username"));
   const password = String(data.get("password") || "");
+
   state.staffLoginDraft = { username, password };
 
   if (!username || !password) {
@@ -2407,16 +2410,18 @@ async function loginStaffUser(form) {
     return;
   }
 
-  const response = await staffAuthRequest("/api/staff/login", { username, password });
-  if (!response.ok) {
-    setStaffLoginError(response.data?.error || "Não foi possível entrar.");
-    return;
-  }
+  try {
+    const user = await loginStaffUserSupabase(username, password);
 
-  state.staffUser = response.data.user;
-  state.staffLoginError = "";
-  state.staffLoginDraft = { username: "", password: "" };
-  await enterStaffPanel();
+    state.staffUser = user;
+    state.staffLoginError = "";
+    state.staffLoginDraft = { username: "", password: "" };
+
+    await enterStaffPanel();
+  } catch (error) {
+    console.error("Erro no login do funcionário:", error);
+    setStaffLoginError(error.message || "Não foi possível entrar.");
+  }
 }
 
 async function registerStaffUser(form) {
@@ -2425,6 +2430,7 @@ async function registerStaffUser(form) {
   const lastName = cleanNamePart(data.get("lastName"));
   const password = String(data.get("password") || "");
   const managerCode = normalizePlainText(data.get("managerCode"));
+
   state.staffRegisterDraft = { firstName, lastName, password, managerCode };
 
   if (!firstName || !lastName || !password || !managerCode) {
@@ -2444,34 +2450,43 @@ async function registerStaffUser(form) {
   }
 
   const authorizedBy = STAFF_MASTER_CODES[managerCode];
+
   if (!authorizedBy) {
     setStaffLoginError("Código de gestor master inválido.");
     return;
   }
 
   const username = staffUsernameFromName(firstName, lastName);
+
   if (!username) {
     setStaffLoginError("Não foi possível criar o usuário. Revise nome e sobrenome.");
     return;
   }
 
-  const response = await staffAuthRequest("/api/staff/register", {
-    username,
-    password,
-    firstName,
-    lastName,
-    managerCode
-  });
-  if (!response.ok) {
-    setStaffLoginError(response.data?.error || "Não foi possível criar o acesso.");
-    return;
-  }
+  try {
+    const user = await registerStaffUserSupabase({
+      username,
+      password,
+      firstName,
+      lastName,
+      authorizedBy
+    });
 
-  state.staffUser = response.data.user;
-  state.staffLoginMode = "login";
-  state.staffLoginError = "";
-  state.staffRegisterDraft = { firstName: "", lastName: "", password: "", managerCode: "" };
-  await enterStaffPanel();
+    state.staffUser = user;
+    state.staffLoginMode = "login";
+    state.staffLoginError = "";
+    state.staffRegisterDraft = {
+      firstName: "",
+      lastName: "",
+      password: "",
+      managerCode: ""
+    };
+
+    await enterStaffPanel();
+  } catch (error) {
+    console.error("Erro no cadastro do funcionário:", error);
+    setStaffLoginError(error.message || "Não foi possível criar o acesso.");
+  }
 }
 
 async function enterStaffPanel() {
