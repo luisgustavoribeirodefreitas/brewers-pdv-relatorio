@@ -619,6 +619,12 @@ function recalculateStaffOrder(order) {
 
 function updateStaffOrderItemQty(orderId, itemKey, delta) {
   const order = state.staffOrders.find((entry) => String(entry.id) === String(orderId));
+
+  if (isOrderPaid(order)) {
+    showToast("Pedidos pagos não podem ser editados.");
+    return;
+  }
+
   if (!order?.items?.length) return;
   const item = order.items.find((entry, index) => staffOrderItemKey(entry, index) === String(itemKey));
   if (!item) return;
@@ -629,6 +635,12 @@ function updateStaffOrderItemQty(orderId, itemKey, delta) {
 
 function removeStaffOrderItem(orderId, itemKey) {
   const order = state.staffOrders.find((entry) => String(entry.id) === String(orderId));
+
+  if (isOrderPaid(order)) {
+    showToast("Pedidos pagos não podem ser editados.");
+    return;
+  }
+
   if (!order?.items?.length) return;
   order.items = order.items.filter((entry, index) => staffOrderItemKey(entry, index) !== String(itemKey));
   recalculateStaffOrder(order);
@@ -2262,17 +2274,34 @@ document.addEventListener("click", (event) => {
     "advance-order": () => advanceOrder(target.dataset.orderId),
     "staff-order-detail": () => {
       state.selectedStaffOrderId = target.dataset.orderId;
-      const order = state.staffOrders.find((o) => String(o.id) === String(target.dataset.orderId));
-      if (order?.status === "Entregue") {
+
+      const order = state.staffOrders.find(
+        (o) => String(o.id) === String(target.dataset.orderId)
+      );
+
+      if (!order) {
+        showToast("Pedido não encontrado.");
+        return;
+      }
+
+      if (isOrderPaid(order)) {
+        showToast("Pedidos pagos não podem ser editados.");
+        return;
+      }
+
+      if (order.status === "Entregue") {
         showToast("Pedidos entregues não podem ser editados.");
         return;
       }
-      if (order) {
-        state.staffOrderSnapshot = JSON.parse(JSON.stringify({ items: order.items, total: order.total }));
-      }
+
+      state.staffOrderSnapshot = JSON.parse(JSON.stringify({
+        items: order.items,
+        total: order.total
+      }));
+
       state.staffModal = "order-detail";
       render();
-    },
+},
     "staff-order-item-increase": () => updateStaffOrderItemQty(target.dataset.orderId, target.dataset.itemKey, 1),
     "staff-order-item-decrease": () => updateStaffOrderItemQty(target.dataset.orderId, target.dataset.itemKey, -1),
     "staff-order-item-remove": () => removeStaffOrderItem(target.dataset.orderId, target.dataset.itemKey),
@@ -2558,6 +2587,11 @@ async function saveStaffOrderItems() {
 
   if (!order) {
     return;
+  }
+
+  if (isOrderPaid(order)) {
+  showToast("Pedidos pagos não podem ser editados.");
+  return;
   }
 
   if (!order.items?.length) {
