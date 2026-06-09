@@ -2283,6 +2283,50 @@ button {
   justify-content: center;
 }
 
+/* Grid do fechamento de caixa */
+.fechamento-grid {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.fechamento-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-header);
+  white-space: nowrap;
+}
+
+.fechamento-value {
+  min-width: 90px;
+  min-height: 40px;
+  background: var(--color-surface-muted);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-header);
+  padding: 0 12px;
+}
+
+.fechamento-arrow {
+  font-size: 18px;
+  color: var(--color-brand-dark);
+  text-align: center;
+}
+
+.fechamento-input {
+  min-height: 40px;
+}
+
+.fechamento-readonly {
+  background: var(--color-surface-muted) !important;
+  color: var(--color-muted) !important;
+  cursor: default;
+}
 /* Rótulo simples para "Motivo" em Sangria/Suprimento */
 .staff-money-label-plain {
   display: grid;

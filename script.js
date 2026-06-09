@@ -432,6 +432,16 @@ function totals() {
   return { subtotal, service, total: subtotal + service };
 }
 
+function paymentTotals() {
+  const map = { Dinheiro: 0, Pix: 0, "Crédito": 0 };
+  state.staffOrders.forEach((order) => {
+    const method = order.paymentMethod;
+    const val = Number(order.total || 0);
+    if (method && map[method] !== undefined) map[method] += val;
+  });
+  return map;
+}
+
 function productById(id) {
   return products.find((product) => product.id === id);
 }
@@ -1315,13 +1325,28 @@ function renderStaffModal() {
       </div>
       <label class="staff-money-label-plain">Motivo<textarea class="staff-money-textarea" placeholder=""></textarea></label>
     `,
-    fechamento: `
-      <div class="payment-summary">
-        <div><span>Dinheiro:</span><strong>R$100</strong></div>
-        <div><span>Pix:</span><strong>R$49</strong></div>
-        <div><span>Crédito:</span><strong>R$165</strong></div>
-      </div>
-    `,
+    fechamento: (() => {
+      const pt = paymentTotals();
+      return `
+        <p class="staff-money-subtitle">Conferência de valores</p>
+        <div class="fechamento-grid">
+          <span class="fechamento-label">Dinheiro:</span>
+          <strong class="fechamento-value">${money(pt.Dinheiro)}</strong>
+          <span class="fechamento-arrow">→</span>
+          <input class="staff-money-input fechamento-input" type="text" inputmode="decimal" placeholder="0,00" data-method="Dinheiro">
+
+          <span class="fechamento-label">Pix:</span>
+          <strong class="fechamento-value">${money(pt.Pix)}</strong>
+          <span class="fechamento-arrow">→</span>
+          <input class="staff-money-input fechamento-input fechamento-readonly" type="text" value="${pt.Pix.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}" disabled data-method="Pix">
+
+          <span class="fechamento-label">Crédito:</span>
+          <strong class="fechamento-value">${money(pt["Crédito"])}</strong>
+          <span class="fechamento-arrow">→</span>
+          <input class="staff-money-input fechamento-input fechamento-readonly" type="text" value="${pt["Crédito"].toLocaleString("pt-BR", { minimumFractionDigits: 2 })}" disabled data-method="Crédito">
+        </div>
+      `;
+    })(),
     product: `
       <div class="staff-form-grid">
         <label>Nome<input value="Novo produto"></label>
@@ -1646,6 +1671,11 @@ document.addEventListener("click", (event) => {
     "generate-report": () => showToast("Relatório gerado"),
     "show-toast": () => showToast(target.dataset.message || "Ação realizada"),
     "confirm-payment": () => {
+      // salva a forma de pagamento no pedido
+      const select = document.querySelector(".staff-dialog select");
+      const paymentMethod = select?.value || "Dinheiro";
+      const order = selectedStaffOrder();
+      if (order) order.paymentMethod = paymentMethod;
       state.staffModal = null;
       showToast("Pagamento confirmado");
     }
