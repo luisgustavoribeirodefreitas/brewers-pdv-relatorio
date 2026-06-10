@@ -3,6 +3,7 @@ import {
   getClients,
   getCash,
   getTables,
+  getOrders,
   saveTable,
   deleteTable,
   saveProduct,
@@ -694,25 +695,58 @@ async function syncProducts() {
   }
 }
 
-function syncOrders() {
-  return listenOrders((firebaseOrders) => {
-    state.staffOrders = firebaseOrders.map(orderFromApi);
+let unsubscribeOrders = null;
+
+function applyOrdersSnapshot(apiOrders = []) {
+  const safeOrders = Array.isArray(apiOrders) ? apiOrders : [];
+
+  state.staffOrders = safeOrders.map(orderFromApi);
+  state.ordersLoaded = true;
+
+  const currentTableIsOccupied = occupiedStaffTables().has(
+    normalizePlainText(state.currentTable)
+  );
+
+  const canChangeClientTable =
+    state.view === "welcome" ||
+    (state.view === "menu" && state.cart.length === 0);
+
+  if ((!state.currentTable || currentTableIsOccupied) && canChangeClientTable) {
+    state.currentTable = randomAvailableTable() || "";
+  }
+
+  render();
+}
+
+async function refreshOrdersNow() {
+  try {
+    const apiOrders = await getOrders();
+    applyOrdersSnapshot(apiOrders);
+    return apiOrders;
+  } catch (error) {
+    console.error("Erro ao buscar pedidos:", error);
     state.ordersLoaded = true;
-
-    const currentTableIsOccupied = occupiedStaffTables().has(
-      normalizePlainText(state.currentTable)
-    );
-
-    const canChangeClientTable =
-      state.view === "welcome" ||
-      (state.view === "menu" && state.cart.length === 0);
-
-    if ((!state.currentTable || currentTableIsOccupied) && canChangeClientTable) {
-      state.currentTable = randomAvailableTable() || "";
-    }
-
     render();
+    return [];
+  }
+}
+
+function startOrdersRealtime() {
+  if (unsubscribeOrders) {
+    return unsubscribeOrders;
+  }
+
+  unsubscribeOrders = listenOrders((apiOrders) => {
+    applyOrdersSnapshot(apiOrders);
   });
+
+  return unsubscribeOrders;
+}
+
+async function syncOrders() {
+  startOrdersRealtime();
+  await refreshOrdersNow();
+  return unsubscribeOrders;
 }
 
 async function syncClients() {
@@ -742,8 +776,14 @@ async function syncTables() {
 }
 
 async function bootstrap() {
-  await Promise.all([syncProducts(), syncClients(), syncCash(), syncTables()]);
-  syncOrders();
+  await Promise.all([
+    syncProducts(),
+    syncClients(),
+    syncCash(),
+    syncTables(),
+    syncOrders()
+  ]);
+
   render();
 }
 
