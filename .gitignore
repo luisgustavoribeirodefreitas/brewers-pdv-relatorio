@@ -9,3 +9,8 @@ __pycache__/
 .vscode/
 .DS_Store
 *.log
+*.bak
+*.tmp
+*.swp
+*.swo
+legacy/
