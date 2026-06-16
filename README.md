@@ -83,6 +83,40 @@ https://luisgustavoribeirodefreitas.github.io/brewers-pdv-relatorio/#atendente
 
 ---
 
+## Demonstração
+
+### Área do cliente
+
+Tela inicial da área do cliente, com acesso ao cardápio digital e às principais ações do sistema.
+
+![Área do cliente](assets/screenshots/home-cliente.png)
+
+---
+
+### Cardápio digital
+
+Visualização dos produtos disponíveis para pedido, organizados de forma simples e intuitiva para o cliente.
+
+![Cardápio digital](assets/screenshots/cardapio.png)
+
+---
+
+### Painel do atendente
+
+Área administrativa utilizada pela equipe para acompanhar pedidos, mesas, clientes, produtos, caixa e pagamentos.
+
+![Painel do atendente](assets/screenshots/painel-atendente.png)
+
+---
+
+### Gerenciamento de produtos
+
+Tela de administração dos produtos, permitindo visualizar e gerenciar os itens disponíveis no sistema.
+
+![Gerenciamento de produtos](assets/screenshots/produtos-admin.png)
+
+---
+
 ## Contexto do desenvolvimento
 
 Este projeto foi desenvolvido com foco em prática de desenvolvimento web, modelagem de dados, integração com backend e construção de interfaces a partir de protótipo no Figma.
